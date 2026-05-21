@@ -704,6 +704,7 @@ const gameState = {
   bustActive: false,
   flashMsg: null,
   flashTimer: null,
+  visitEdit: null,   // { pi, vi, value } — set when editing a past visit via numpad
 };
 
 // ── Build interleaved player order ────────────────────
@@ -914,14 +915,18 @@ function renderScoringUI() {
     if (gs.flashMsg) {
       ivEl.textContent = gs.flashMsg.text;
       ivEl.className   = 'sc-input-val ' + (gs.flashMsg.cls || '');
+    } else if (gs.visitEdit) {
+      ivEl.textContent = gs.visitEdit.value || '—';
+      ivEl.className   = 'sc-input-val';
     } else {
       ivEl.textContent = gs.currentInput || '—';
       ivEl.className   = 'sc-input-val';
     }
   }
-  if (ilEl) ilEl.textContent = `${cp.name} — Leg ${gs.currentLeg}`;
+  if (ilEl) ilEl.textContent = gs.visitEdit ? 'Editing visit' : `${cp.name} — Leg ${gs.currentLeg}`;
 
-  renderVisitHistory();
+  // Don't rebuild the history table while a visit is being edited — it would destroy the edit row
+  if (!gs.visitEdit) renderVisitHistory();
 }
 
 // ── Last 3 visits for a side inside the score panel ───
@@ -1136,6 +1141,21 @@ function handleNumpadInput(val) {
   const gs = gameState;
   if (gs.flashMsg) return;
 
+  // ── Visit edit mode: route all numpad input to the editor ──
+  if (gs.visitEdit) {
+    if (val === 'confirm') { commitVisitEdit(); return; }
+    if (val === 'undo')    { cancelVisitEdit(); return; }
+    if (val === 'bust')    { gs.visitEdit.value = ''; updateEditDisplay(); return; }
+    if (val === 'del')     { gs.visitEdit.value = gs.visitEdit.value.slice(0, -1); updateEditDisplay(); return; }
+    // Digit
+    const candidate = gs.visitEdit.value + val;
+    const parsed    = parseInt(candidate, 10);
+    if (isNaN(parsed) || parsed > 180) return;
+    gs.visitEdit.value = candidate;
+    updateEditDisplay();
+    return;
+  }
+
   if (val === 'del') {
     gs.currentInput = gs.currentInput.slice(0, -1);
     renderScoringUI();
@@ -1320,40 +1340,92 @@ function recalcSideScore(side) {
   gs.sideScores[side] = rem;
 }
 
-// ── Inline visit editing ──────────────────────────────
+// ── Inline visit editing (keyboard-free — uses on-screen numpad) ─
 function activateVisitEdit(row, pi, vi) {
   const gs    = gameState;
   const visit = gs.players[pi] && gs.players[pi].visits[vi];
   if (!visit) return;
 
-  const editHtml = `<div class="sc-history-edit-row" data-pi="${pi}" data-vi="${vi}">
-    <input type="number" min="0" max="180" value="${visit.wasBust ? '' : visit.scored}" placeholder="0-180 or blank=BUST">
-    <button class="sc-edit-save">Save</button>
-    <button class="sc-edit-cancel">Cancel</button>
-  </div>`;
+  // Store edit state; numpad routes here while this is set
+  gs.visitEdit = { pi, vi, value: visit.wasBust ? '' : String(visit.scored) };
+
+  // readonly + inputmode="none" prevents iOS keyboard from appearing
+  const editHtml =
+    `<div class="sc-history-edit-row" id="sc-visit-edit-row" data-pi="${pi}" data-vi="${vi}">` +
+    `<input id="sc-visit-edit-inp" type="text" readonly inputmode="none"` +
+    ` value="${gs.visitEdit.value}" placeholder="0–180 · empty=BUST"/>` +
+    `<button class="sc-edit-save">&#10003;</button>` +
+    `<button class="sc-edit-cancel">&#10005;</button>` +
+    `</div>`;
 
   row.outerHTML = editHtml;
 
-  const histEl  = document.getElementById('sc-history');
+  const histEl = document.getElementById('sc-history');
   if (!histEl) return;
-  const editRow = histEl.querySelector(`.sc-history-edit-row[data-pi="${pi}"][data-vi="${vi}"]`);
+  const editRow = document.getElementById('sc-visit-edit-row');
   if (!editRow) return;
 
-  editRow.querySelector('.sc-edit-save').addEventListener('click', () => {
-    const inp = editRow.querySelector('input');
-    const raw = inp.value.trim();
-    if (raw === '') {
-      visit.scored = 0; visit.wasBust = true;
-    } else {
-      const n = parseInt(raw, 10);
-      if (isNaN(n) || n < 0 || n > 180) { inp.style.borderColor = 'var(--danger)'; return; }
-      visit.scored = n; visit.wasBust = false;
-    }
-    Object.keys(gameState.sideScores).forEach(side => recalcSideScore(side));
-    renderScoringUI();
-  });
+  editRow.querySelector('.sc-edit-save').addEventListener('click',   () => commitVisitEdit());
+  editRow.querySelector('.sc-edit-cancel').addEventListener('click', () => cancelVisitEdit());
 
-  editRow.querySelector('.sc-edit-cancel').addEventListener('click', () => renderVisitHistory());
+  // Tap outside the edit row → cancel (delayed one tick so this tap doesn't self-cancel)
+  histEl._editOutsideHandler = e => {
+    if (!editRow.contains(e.target)) cancelVisitEdit();
+  };
+  setTimeout(() => histEl.addEventListener('click', histEl._editOutsideHandler), 0);
+
+  updateEditDisplay();
+}
+
+// ── Visit edit helpers ────────────────────────────────
+// Update the edit row input + numpad label/value without rebuilding the table
+function updateEditDisplay() {
+  const gs  = gameState;
+  const ed  = gs.visitEdit;
+  const inp = document.getElementById('sc-visit-edit-inp');
+  if (inp) inp.value = ed ? ed.value : '';
+  const ilEl = document.getElementById('sc-input-label');
+  const ivEl = document.getElementById('sc-input-val');
+  if (ilEl) ilEl.textContent = 'Editing visit';
+  if (ivEl) { ivEl.textContent = (ed && ed.value) ? ed.value : '—'; ivEl.className = 'sc-input-val'; }
+}
+
+function commitVisitEdit() {
+  const gs    = gameState;
+  const ed    = gs.visitEdit;
+  if (!ed) return;
+  const visit = gs.players[ed.pi] && gs.players[ed.pi].visits[ed.vi];
+  if (!visit) { cancelVisitEdit(); return; }
+  const raw = ed.value.trim();
+  if (raw === '') {
+    visit.scored = 0; visit.wasBust = true;
+  } else {
+    const n = parseInt(raw, 10);
+    if (isNaN(n) || n < 0 || n > 180) {
+      const inp = document.getElementById('sc-visit-edit-inp');
+      if (inp) { inp.style.borderColor = 'var(--danger)'; setTimeout(() => { inp.style.borderColor = ''; }, 800); }
+      return;
+    }
+    visit.scored = n; visit.wasBust = false;
+  }
+  gs.visitEdit = null;
+  cleanEditOutsideHandler();
+  Object.keys(gs.sideScores).forEach(side => recalcSideScore(side));
+  renderScoringUI();
+}
+
+function cancelVisitEdit() {
+  gameState.visitEdit = null;
+  cleanEditOutsideHandler();
+  renderScoringUI();
+}
+
+function cleanEditOutsideHandler() {
+  const histEl = document.getElementById('sc-history');
+  if (histEl && histEl._editOutsideHandler) {
+    histEl.removeEventListener('click', histEl._editOutsideHandler);
+    histEl._editOutsideHandler = null;
+  }
 }
 
 // ── Populate stats screen ─────────────────────────────
