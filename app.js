@@ -634,26 +634,26 @@ renderMatchSetup();
     // ── MAIN TABLE (capped height, scrollable) ────────
     '.sc-table-wrap{flex:1;min-height:0;overflow-y:auto;background:#1a1a1a;}',
     '.sc-table-wrap::-webkit-scrollbar{width:4px;}.sc-table-wrap::-webkit-scrollbar-track{background:#111;}.sc-table-wrap::-webkit-scrollbar-thumb{background:#444;border-radius:2px;}',
-    '.sc-tbl-head{display:grid;grid-template-columns:1fr 1.4fr 36px 1fr 1.4fr;background:#1e1e1e;border-bottom:2px solid #333;position:sticky;top:0;z-index:2;}',
-    '.sc-tbl-head>div{padding:3px 6px;font-size:9px;font-weight:700;color:#888;letter-spacing:1px;text-transform:uppercase;font-family:Arial,sans-serif;display:flex;align-items:center;}',
-    '.sc-tbl-row{display:grid;grid-template-columns:1fr 1.4fr 36px 1fr 1.4fr;border-bottom:1px solid #333;min-height:40px;}',
+    '.sc-tbl-head{display:grid;grid-template-columns:1fr 1.4fr 36px 1.4fr 1fr;background:#1e1e1e;border-bottom:2px solid #333;position:sticky;top:0;z-index:2;}',
+    '.sc-tbl-head>div{padding:3px 6px;font-size:14px;font-weight:700;color:#888;letter-spacing:1px;text-transform:uppercase;font-family:Arial,sans-serif;display:flex;align-items:center;}',
+    '.sc-tbl-row{display:grid;grid-template-columns:1fr 1.4fr 36px 1.4fr 1fr;border-bottom:1px solid #333;min-height:40px;}',
     '.sc-tbl-row:nth-child(odd){background:#1a1a1a;}',
     '.sc-tbl-row:nth-child(even){background:#222;}',
     '.sc-tbl-row:not(.sc-tbl-start):not(.sc-tbl-pending){cursor:pointer;}',
     '.sc-tbl-row:not(.sc-tbl-start):not(.sc-tbl-pending):hover{background:#2a2a2a;}',
     '.sc-tbl-row>div{padding:3px 6px;font-size:13px;font-family:Arial,sans-serif;color:#ccc;display:flex;align-items:center;}',
-    '.sc-tbl-c1{justify-content:flex-end;font-size:13px;font-weight:600;color:#999;}',
+    '.sc-tbl-c1{justify-content:flex-end;font-size:13px;font-weight:600;color:#999;border-right:1px solid #555;}',
     '.sc-tbl-c2{justify-content:flex-end;font-size:22px;font-weight:900;color:#fff;font-family:"Arial Black",Arial,sans-serif;}',
     '.sc-tbl-c3{justify-content:center;background:#161616;color:#555;font-size:10px;border-left:1px solid #333;border-right:1px solid #333;}',
-    '.sc-tbl-c4{justify-content:flex-start;font-size:13px;font-weight:600;color:#999;}',
-    '.sc-tbl-c5{justify-content:flex-start;font-size:22px;font-weight:900;color:#fff;font-family:"Arial Black",Arial,sans-serif;}',
+    '.sc-tbl-c4{justify-content:flex-start;font-size:22px;font-weight:900;color:#fff;font-family:"Arial Black",Arial,sans-serif;border-right:1px solid #555;}',
+    '.sc-tbl-c5{justify-content:flex-start;font-size:13px;font-weight:600;color:#999;}',
     '.sc-tbl-start{background:#161616!important;cursor:default!important;}',
     '.sc-tbl-start>div{color:#555!important;font-size:11px!important;font-weight:400!important;font-style:italic;}',
     '.sc-tbl-pending{cursor:default!important;}',
     '.sc-tbl-pending-cell{background:var(--accent)!important;color:#fff!important;font-weight:700!important;}',
     '.sc-tbl-bust{color:#ff6b6b!important;font-size:10px!important;font-weight:700!important;}',
     // Edit row inside table
-    '.sc-history-edit-row{background:#222;border-bottom:1px solid #333;display:flex;align-items:center;gap:6px;padding:5px 10px;}',
+    '.sc-history-edit-row{background:rgba(232,82,10,0.08);border:1px solid var(--accent)!important;}',
     '.sc-history-edit-row input{flex:1;background:#333;color:#fff;border:1px solid var(--accent);border-radius:6px;padding:4px 8px;font-size:13px;}',
     '.sc-history-edit-row button{padding:4px 10px;border-radius:6px;border:none;cursor:pointer;font-size:12px;font-weight:700;}',
     '.sc-edit-save{background:var(--accent);color:#fff;}',
@@ -1058,15 +1058,15 @@ function renderVisitHistory() {
       <div class="sc-tbl-c1">Scored</div>
       <div class="sc-tbl-c2">To Go</div>
       <div class="sc-tbl-c3">DARTS</div>
-      <div class="sc-tbl-c4">Scored</div>
-      <div class="sc-tbl-c5">To Go</div>
+      <div class="sc-tbl-c4">To Go</div>
+      <div class="sc-tbl-c5">Scored</div>
     </div>
     <div class="sc-tbl-row sc-tbl-start">
       <div class="sc-tbl-c1"></div>
       <div class="sc-tbl-c2">${startScore}</div>
       <div class="sc-tbl-c3">&mdash;</div>
-      <div class="sc-tbl-c4"></div>
-      <div class="sc-tbl-c5">${startScore}</div>
+      <div class="sc-tbl-c4">${startScore}</div>
+      <div class="sc-tbl-c5"></div>
     </div>`;
 
   // One row per round; centre column shows cumulative dart count (3, 6, 9…)
@@ -1075,8 +1075,8 @@ function renderVisitHistory() {
     const rv = rightVisits[i];
     const c1 = lv ? (lv.v.wasBust ? 'BUST' : String(lv.v.scored)) : '';
     const c2 = lv ? String(lv.v.remaining) : '';
-    const c4 = rv ? (rv.v.wasBust ? 'BUST' : String(rv.v.scored)) : '';
-    const c5 = rv ? String(rv.v.remaining) : '';
+    const c4 = rv ? String(rv.v.remaining) : '';
+    const c5 = rv ? (rv.v.wasBust ? 'BUST' : String(rv.v.scored)) : '';
     const lPi = lv ? lv.pi : -1, lVi = lv ? lv.vi : -1;
     const rPi = rv ? rv.pi : -1, rVi = rv ? rv.vi : -1;
     html += `
@@ -1084,8 +1084,8 @@ function renderVisitHistory() {
         <div class="sc-tbl-c1${lv && lv.v.wasBust ? ' sc-tbl-bust' : ''}">${escHtml(c1)}</div>
         <div class="sc-tbl-c2">${escHtml(c2)}</div>
         <div class="sc-tbl-c3">${(i + 1) * 3}</div>
-        <div class="sc-tbl-c4${rv && rv.v.wasBust ? ' sc-tbl-bust' : ''}">${escHtml(c4)}</div>
-        <div class="sc-tbl-c5">${escHtml(c5)}</div>
+        <div class="sc-tbl-c4">${escHtml(c4)}</div>
+        <div class="sc-tbl-c5${rv && rv.v.wasBust ? ' sc-tbl-bust' : ''}">${escHtml(c5)}</div>
       </div>`;
   }
 
@@ -1099,8 +1099,8 @@ function renderVisitHistory() {
           <div class="sc-tbl-c1${isLeft  ? ' sc-tbl-pending-cell' : ''}">${isLeft  ? escHtml(inputText) : ''}</div>
           <div class="sc-tbl-c2${isLeft  ? ' sc-tbl-pending-cell' : ''}"></div>
           <div class="sc-tbl-c3">&#9658;</div>
-          <div class="sc-tbl-c4${!isLeft ? ' sc-tbl-pending-cell' : ''}">${!isLeft ? escHtml(inputText) : ''}</div>
-          <div class="sc-tbl-c5${!isLeft ? ' sc-tbl-pending-cell' : ''}"></div>
+          <div class="sc-tbl-c4${!isLeft ? ' sc-tbl-pending-cell' : ''}"></div>
+          <div class="sc-tbl-c5${!isLeft ? ' sc-tbl-pending-cell' : ''}">${!isLeft ? escHtml(inputText) : ''}</div>
         </div>`;
     }
   }
@@ -1165,10 +1165,16 @@ function handleNumpadInput(val) {
   if (gs.visitEdit) {
     if (val === 'confirm') { commitVisitEdit(); return; }
     if (val === 'undo')    { cancelVisitEdit(); return; }
-    if (val === 'bust')    { gs.visitEdit.value = ''; updateEditDisplay(); return; }
-    if (val === 'del')     { gs.visitEdit.value = gs.visitEdit.value.slice(0, -1); updateEditDisplay(); return; }
-    // Digit
-    const candidate = gs.visitEdit.value + val;
+    if (val === 'bust')    { gs.visitEdit.value = ''; gs.visitEdit.fresh = false; updateEditDisplay(); return; }
+    if (val === 'del') {
+      gs.visitEdit.value = gs.visitEdit.fresh ? '' : gs.visitEdit.value.slice(0, -1);
+      gs.visitEdit.fresh = false;
+      updateEditDisplay();
+      return;
+    }
+    // Digit — first keypress clears the pre-filled value and starts fresh
+    const candidate = gs.visitEdit.fresh ? val : gs.visitEdit.value + val;
+    gs.visitEdit.fresh = false;
     const parsed    = parseInt(candidate, 10);
     if (isNaN(parsed) || parsed > 180) return;
     gs.visitEdit.value = candidate;
@@ -1367,15 +1373,29 @@ function activateVisitEdit(row, pi, vi) {
   if (!visit) return;
 
   // Store edit state; numpad routes here while this is set
-  gs.visitEdit = { pi, vi, value: visit.wasBust ? '' : String(visit.scored) };
+  // fresh=true: first digit pressed clears the old value before appending
+  gs.visitEdit = { pi, vi, value: visit.wasBust ? '' : String(visit.scored), fresh: true };
 
-  // readonly + inputmode="none" prevents iOS keyboard from appearing
-  const editHtml =
-    `<div class="sc-history-edit-row" id="sc-visit-edit-row" data-pi="${pi}" data-vi="${vi}">` +
+  // Determine which half of the table this visit belongs to (left or right)
+  const leftSide = gs.mode === 'training' ? 't0' : 'home';
+  const isLeft   = gs.players[pi].side === leftSide;
+
+  // Build the edit controls inline — readonly+inputmode=none keeps iOS keyboard closed
+  const editControls =
+    `<div style="display:flex;align-items:center;gap:3px;padding:2px 4px;">` +
     `<input id="sc-visit-edit-inp" type="text" readonly inputmode="none"` +
-    ` value="${gs.visitEdit.value}" placeholder="0–180 · empty=BUST"/>` +
-    `<button class="sc-edit-save">&#10003;</button>` +
-    `<button class="sc-edit-cancel">&#10005;</button>` +
+    ` value="${gs.visitEdit.value}" placeholder="0–180"` +
+    ` style="flex:1;min-width:0;background:#333;color:#fff;border:1px solid var(--accent);border-radius:6px;padding:3px 6px;font-size:13px;"/>` +
+    `<button class="sc-edit-save" style="padding:3px 8px;border-radius:6px;border:none;cursor:pointer;font-size:12px;font-weight:700;background:var(--accent);color:#fff;">&#10003;</button>` +
+    `<button class="sc-edit-cancel" style="padding:3px 8px;border-radius:6px;border:none;cursor:pointer;font-size:12px;font-weight:700;background:#555;color:#fff;">&#10005;</button>` +
+    `</div>`;
+
+  // Edit row uses the same grid as sc-tbl-row; controls span only the active side's columns
+  const editHtml =
+    `<div class="sc-tbl-row sc-history-edit-row" id="sc-visit-edit-row" data-pi="${pi}" data-vi="${vi}">` +
+    (isLeft
+      ? `<div style="grid-column:1/3;">${editControls}</div><div class="sc-tbl-c3">&#9998;</div><div style="grid-column:4/6;"></div>`
+      : `<div style="grid-column:1/3;"></div><div class="sc-tbl-c3">&#9998;</div><div style="grid-column:4/6;">${editControls}</div>`) +
     `</div>`;
 
   row.outerHTML = editHtml;
