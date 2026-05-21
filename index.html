@@ -45,6 +45,13 @@
       <span class="btn-icon">&#128203;</span>Match History<span class="btn-sub">Past results</span>
     </button>
   </div>
+  <button class="btn btn-secondary btn-mega" data-target="screen-tournament-setup">
+    <span class="btn-icon">&#127942;</span>Tournament<span class="btn-sub">Knockout bracket</span>
+  </button>
+  <button class="btn btn-ghost btn-sm" id="btn-resume-tournament"
+          style="display:none;align-items:center;justify-content:center;gap:8px;">
+    &#9654; Resume Tournament in Progress
+  </button>
 </section>
 
 <section class="screen" id="screen-match-setup" style="display:none">
@@ -117,6 +124,14 @@
 
 <section class="screen" id="screen-training-stats" style="display:none">
   <!-- content rendered dynamically by renderTrainingStats() -->
+</section>
+
+<section class="screen" id="screen-tournament-setup" style="display:none">
+  <!-- content rendered dynamically by renderTournamentSetup() -->
+</section>
+
+<section class="screen" id="screen-tournament-bracket" style="display:none">
+  <!-- content rendered dynamically by renderTournamentBracket() -->
 </section>
 
 </div><!-- /screens -->

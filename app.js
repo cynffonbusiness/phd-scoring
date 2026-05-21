@@ -2484,6 +2484,381 @@ function saveMatchToHistory() {
   });
 }());
 
+/* ══════════════════════════════════════════════════════
+   TOURNAMENT MODE
+══════════════════════════════════════════════════════ */
+
+// ── CSS injection ──────────────────────────────────────
+(function(){
+  const s = document.createElement('style');
+  s.textContent = [
+    '.trn-roster-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;}',
+    '.trn-roster-btn{background:var(--bg-raised);border:2px solid var(--border);border-radius:var(--radius);color:var(--text);font-family:Arial,sans-serif;font-weight:700;font-size:0.85rem;padding:8px 4px;cursor:pointer;text-align:center;min-height:48px;-webkit-tap-highlight-color:transparent;transition:background 0.12s,border-color 0.12s;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}',
+    '.trn-roster-btn.trn-sel{background:var(--accent);border-color:var(--accent);color:#fff;}',
+    '.trn-selected-list{display:flex;flex-direction:column;gap:6px;}',
+    '.trn-selected-item{display:flex;align-items:center;justify-content:space-between;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);padding:10px 14px;min-height:48px;}',
+    '.trn-selected-name{font-size:0.9rem;font-family:Arial,sans-serif;flex:1;}',
+    '.trn-remove-btn{background:none;border:1px solid var(--danger);color:var(--danger);border-radius:6px;padding:4px 10px;font-size:0.9rem;cursor:pointer;min-height:36px;min-width:36px;-webkit-tap-highlight-color:transparent;}',
+    '.bracket-scroll{overflow-x:auto;overflow-y:visible;flex:1;}',
+    '.bracket-container{display:flex;gap:0;min-width:max-content;padding:4px 4px 16px;}',
+    '.bracket-connector{width:10px;flex-shrink:0;}',
+    '.bracket-round{display:flex;flex-direction:column;width:165px;flex-shrink:0;}',
+    '.bracket-round-active .bracket-round-label{color:var(--accent);}',
+    '.bracket-round-label{font-size:0.6rem;color:var(--text-muted);letter-spacing:2px;text-transform:uppercase;font-family:Arial,sans-serif;text-align:center;padding:6px 0 8px;border-bottom:1px solid var(--border);flex-shrink:0;}',
+    '.bracket-round-matches{display:flex;flex-direction:column;}',
+    '.bracket-slot{display:flex;align-items:center;justify-content:center;padding:4px 0;}',
+    '.bracket-match{background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;width:155px;}',
+    '.bracket-match.bm-active{border-color:var(--accent);}',
+    '.bracket-match.bm-done{opacity:0.8;}',
+    '.bracket-player{display:block;width:100%;padding:10px 10px;background:none;border:none;color:var(--text);font-family:Arial,sans-serif;font-size:0.85rem;font-weight:600;text-align:left;cursor:pointer;min-height:44px;-webkit-tap-highlight-color:transparent;transition:background 0.1s;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}',
+    '.bracket-player:not([disabled]):not(.bp-bye):hover{background:var(--bg-raised);}',
+    '.bracket-player.bp-win{background:rgba(232,82,10,0.18);color:var(--accent);font-weight:700;}',
+    '.bracket-player.bp-bye{color:var(--text-muted);font-style:italic;cursor:default;font-size:0.8rem;}',
+    '.bracket-player.bp-out{color:#444;cursor:default;text-decoration:line-through;}',
+    '.bracket-vs{text-align:center;font-size:0.55rem;color:var(--border);font-family:Arial,sans-serif;padding:2px 0;border-top:1px solid var(--border);border-bottom:1px solid var(--border);letter-spacing:2px;}',
+    '.trn-champ-banner{background:linear-gradient(135deg,var(--accent),var(--accent-dim));border-radius:var(--radius-lg);padding:20px 16px;text-align:center;flex-shrink:0;}',
+    '.trn-champ-icon{font-size:2.2rem;margin-bottom:6px;}',
+    '.trn-champ-label{font-size:0.65rem;letter-spacing:3px;text-transform:uppercase;font-family:Arial,sans-serif;opacity:0.85;margin-bottom:4px;}',
+    '.trn-champ-name{font-size:1.8rem;letter-spacing:2px;text-transform:uppercase;font-weight:900;margin-bottom:2px;}',
+    '.trn-champ-sub{font-size:0.7rem;font-family:Arial,sans-serif;opacity:0.75;}',
+  ].join('');
+  document.head.appendChild(s);
+}());
+
+// ── Storage ────────────────────────────────────────────
+const TOURNAMENT_KEY = 'phd_tournament';
+let tournamentState = null;
+
+function loadTournamentState() {
+  try { return JSON.parse(localStorage.getItem(TOURNAMENT_KEY) || 'null'); }
+  catch { return null; }
+}
+function saveTournamentState() {
+  if (tournamentState) localStorage.setItem(TOURNAMENT_KEY, JSON.stringify(tournamentState));
+}
+function clearTournamentState() {
+  localStorage.removeItem(TOURNAMENT_KEY);
+  tournamentState = null;
+}
+
+// ── Bracket logic ──────────────────────────────────────
+function trnShuffle(arr) {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+function buildBracket(players) {
+  const shuffled = trnShuffle(players);
+  let size = 1;
+  while (size < shuffled.length) size *= 2;
+  while (shuffled.length < size) shuffled.push(null); // null = BYE
+
+  const round1 = [];
+  for (let i = 0; i < size; i += 2) {
+    const match = { p1: shuffled[i], p2: shuffled[i + 1], winner: null };
+    if (!match.p1) match.winner = match.p2;
+    else if (!match.p2) match.winner = match.p1;
+    round1.push(match);
+  }
+
+  tournamentState = {
+    players,
+    rounds: [round1],
+    currentRound: 0,
+    champion: null,
+    createdAt: new Date().toISOString()
+  };
+
+  checkTrnAdvance();
+  saveTournamentState();
+}
+
+function checkTrnAdvance() {
+  const round = tournamentState.rounds[tournamentState.currentRound];
+  if (!round || !round.every(m => m.winner)) return;
+  if (round.length === 1) { tournamentState.champion = round[0].winner; return; }
+
+  const next = [];
+  const winners = round.map(m => m.winner);
+  for (let i = 0; i < winners.length; i += 2) {
+    const match = { p1: winners[i], p2: winners[i + 1] || null, winner: null };
+    if (!match.p2) match.winner = match.p1;
+    else if (!match.p1) match.winner = match.p2;
+    next.push(match);
+  }
+  tournamentState.rounds.push(next);
+  tournamentState.currentRound++;
+  saveTournamentState();
+  checkTrnAdvance();
+}
+
+function pickTrnWinner(roundIdx, matchIdx, playerKey) {
+  const match = tournamentState && tournamentState.rounds[roundIdx] && tournamentState.rounds[roundIdx][matchIdx];
+  if (!match || match.winner) return;
+  match.winner = match[playerKey];
+  if (!match.winner) return;
+  checkTrnAdvance();
+  saveTournamentState();
+  renderTournamentBracket();
+}
+
+// ── Home resume button ─────────────────────────────────
+function updateHomeResumeButton() {
+  const btn = document.getElementById('btn-resume-tournament');
+  if (!btn) return;
+  const ts = loadTournamentState();
+  btn.style.display = (ts && !ts.champion) ? 'flex' : 'none';
+}
+
+// ── Setup screen ───────────────────────────────────────
+let trnPlayers = [];
+
+function renderTournamentSetup() {
+  const scr = document.getElementById('screen-tournament-setup');
+  if (!scr) return;
+
+  const roster = getPlayers();
+  trnPlayers = [];
+
+  scr.innerHTML = `
+    <div>
+      <div class="page-title">Tournament</div>
+      <div class="page-subtitle">2–20 players &middot; Knockout bracket</div>
+    </div>
+
+    ${roster.length ? `
+    <div class="form-group">
+      <label class="form-label">PHD Players &mdash; tap to add</label>
+      <div class="trn-roster-grid" id="trn-roster-grid">
+        ${roster.map(p =>
+          `<button class="trn-roster-btn" data-trn-name="${escHtml(p.name)}">${escHtml(p.name)}</button>`
+        ).join('')}
+      </div>
+    </div>` : ''}
+
+    <div class="form-group">
+      <label class="form-label">Add Guest Player</label>
+      <div style="display:flex;gap:8px;">
+        <input class="form-input" id="trn-guest-inp" type="text"
+               placeholder="Guest name" maxlength="32"
+               style="flex:1;min-height:48px;font-family:Arial,sans-serif;font-weight:400;"/>
+        <button class="btn btn-secondary" id="trn-add-guest"
+                style="width:auto;min-width:72px;min-height:48px;font-size:0.85rem;">Add</button>
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">Selected &mdash; <span id="trn-count">0</span> player(s)</label>
+      <div class="trn-selected-list" id="trn-selected-list">
+        <div class="empty-state" style="padding:16px 0;">
+          <div class="empty-text">No players selected yet</div>
+        </div>
+      </div>
+    </div>
+
+    <div style="margin-top:auto;">
+      <button class="btn btn-primary" id="trn-generate" disabled>Generate Bracket</button>
+    </div>
+  `;
+
+  bindTournamentSetup();
+}
+
+function updateTrnSetupUI() {
+  const countEl = document.getElementById('trn-count');
+  if (countEl) countEl.textContent = trnPlayers.length;
+
+  const gen = document.getElementById('trn-generate');
+  if (gen) {
+    const ok = trnPlayers.length >= 2 && trnPlayers.length <= 20;
+    gen.disabled = !ok;
+    gen.textContent = trnPlayers.length > 20
+      ? 'Too many players (max 20)'
+      : ('Generate Bracket' + (ok ? ' (' + trnPlayers.length + ' players)' : ''));
+  }
+
+  const list = document.getElementById('trn-selected-list');
+  if (list) {
+    list.innerHTML = trnPlayers.length
+      ? trnPlayers.map((name, i) => `
+          <div class="trn-selected-item">
+            <span class="trn-selected-name">${escHtml(name)}</span>
+            <button class="trn-remove-btn" data-trn-rm="${i}">&#10005;</button>
+          </div>`).join('')
+      : '<div class="empty-state" style="padding:16px 0;"><div class="empty-text">No players selected yet</div></div>';
+  }
+
+  const grid = document.getElementById('trn-roster-grid');
+  if (grid) {
+    grid.querySelectorAll('.trn-roster-btn').forEach(btn => {
+      btn.classList.toggle('trn-sel', trnPlayers.includes(btn.dataset.trnName));
+    });
+  }
+}
+
+function bindTournamentSetup() {
+  const grid = document.getElementById('trn-roster-grid');
+  if (grid) {
+    grid.addEventListener('click', e => {
+      const btn = e.target.closest('.trn-roster-btn');
+      if (!btn) return;
+      const name = btn.dataset.trnName;
+      const idx  = trnPlayers.indexOf(name);
+      if (idx !== -1) trnPlayers.splice(idx, 1);
+      else if (trnPlayers.length < 20) trnPlayers.push(name);
+      updateTrnSetupUI();
+    });
+  }
+
+  const guestInp = document.getElementById('trn-guest-inp');
+  const addBtn   = document.getElementById('trn-add-guest');
+  const doAdd = () => {
+    const name = (guestInp ? guestInp.value : '').trim();
+    if (!name || trnPlayers.includes(name) || trnPlayers.length >= 20) return;
+    trnPlayers.push(name);
+    if (guestInp) guestInp.value = '';
+    updateTrnSetupUI();
+  };
+  if (addBtn)   addBtn.addEventListener('click', doAdd);
+  if (guestInp) guestInp.addEventListener('keydown', e => { if (e.key === 'Enter') doAdd(); });
+
+  const list = document.getElementById('trn-selected-list');
+  if (list) {
+    list.addEventListener('click', e => {
+      const btn = e.target.closest('[data-trn-rm]');
+      if (btn) { trnPlayers.splice(parseInt(btn.dataset.trnRm, 10), 1); updateTrnSetupUI(); }
+    });
+  }
+
+  const gen = document.getElementById('trn-generate');
+  if (gen) {
+    gen.addEventListener('click', () => {
+      if (trnPlayers.length < 2) return;
+      buildBracket([...trnPlayers]);
+      updateHomeResumeButton();
+      navigateTo('screen-tournament-bracket');
+    });
+  }
+}
+
+// ── Bracket screen ─────────────────────────────────────
+const TRN_SLOT_H = 100; // px height per round-0 match slot
+
+function trnRoundLabel(idx, total) {
+  const fromEnd = total - 1 - idx;
+  if (fromEnd === 0) return 'Final';
+  if (fromEnd === 1) return 'Semi-Final';
+  if (fromEnd === 2) return 'Quarter-Final';
+  return 'Round ' + (idx + 1);
+}
+
+function renderTournamentBracket() {
+  const scr = document.getElementById('screen-tournament-bracket');
+  if (!scr) return;
+
+  const ts = tournamentState;
+  if (!ts) {
+    scr.innerHTML = '<div class="empty-state"><div class="empty-text">No tournament in progress.</div></div>';
+    if (!scr._trnBound) { scr._trnBound = true; scr.addEventListener('click', trnBracketClick); }
+    return;
+  }
+
+  const r0 = ts.rounds[0];
+  const totalH = r0.length * TRN_SLOT_H;
+  const totalRounds = ts.rounds.length;
+
+  let html = `
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-shrink:0;gap:10px;">
+      <div>
+        <div class="page-title" style="margin-bottom:0;text-align:left;font-size:1.3rem;">Tournament</div>
+        <div class="page-subtitle" style="margin-bottom:0;text-align:left;">${ts.players.length} players</div>
+      </div>
+      <button class="btn btn-danger btn-sm" id="trn-new-btn"
+              style="width:auto;min-width:90px;flex-shrink:0;">New &#10005;</button>
+    </div>
+  `;
+
+  if (ts.champion) {
+    html += `
+      <div class="trn-champ-banner">
+        <div class="trn-champ-icon">&#127942;</div>
+        <div class="trn-champ-label">Tournament Champion</div>
+        <div class="trn-champ-name">${escHtml(ts.champion)}</div>
+        <div class="trn-champ-sub">Congratulations!</div>
+      </div>
+    `;
+  }
+
+  html += `<div class="bracket-scroll"><div class="bracket-container">`;
+
+  ts.rounds.forEach((round, ri) => {
+    const slotFlex  = r0.length / round.length;
+    const isActive  = ri === ts.currentRound && !ts.champion;
+    const label     = trnRoundLabel(ri, totalRounds);
+
+    html += `
+      <div class="bracket-round${isActive ? ' bracket-round-active' : ''}">
+        <div class="bracket-round-label">${label}</div>
+        <div class="bracket-round-matches" style="height:${totalH}px;">
+    `;
+
+    round.forEach((match, mi) => {
+      const canPick = isActive && !match.winner;
+      const p1Null  = !match.p1, p2Null = !match.p2;
+      const p1Name  = match.p1 || 'BYE';
+      const p2Name  = match.p2 || 'BYE';
+      const p1Win   = !!(match.winner && match.winner === match.p1);
+      const p2Win   = !!(match.winner && match.winner === match.p2);
+      const p1cls   = p1Null ? ' bp-bye' : p1Win ? ' bp-win' : (match.winner ? ' bp-out' : '');
+      const p2cls   = p2Null ? ' bp-bye' : p2Win ? ' bp-win' : (match.winner ? ' bp-out' : '');
+      const p1attr  = (canPick && !p1Null) ? `data-pick-r="${ri}" data-pick-m="${mi}" data-pick-p="p1"` : 'disabled';
+      const p2attr  = (canPick && !p2Null) ? `data-pick-r="${ri}" data-pick-m="${mi}" data-pick-p="p2"` : 'disabled';
+
+      html += `
+        <div class="bracket-slot" style="flex:${slotFlex};">
+          <div class="bracket-match${canPick ? ' bm-active' : ''}${match.winner ? ' bm-done' : ''}">
+            <button class="bracket-player${p1cls}" ${p1attr}>${escHtml(p1Name)}</button>
+            <div class="bracket-vs">vs</div>
+            <button class="bracket-player${p2cls}" ${p2attr}>${escHtml(p2Name)}</button>
+          </div>
+        </div>
+      `;
+    });
+
+    html += `</div></div>`; // close bracket-round-matches + bracket-round
+    if (ri < ts.rounds.length - 1) html += `<div class="bracket-connector"></div>`;
+  });
+
+  html += `</div></div>`; // close bracket-container + bracket-scroll
+
+  scr.innerHTML = html;
+
+  // Bind click delegation once — persists across innerHTML replacements
+  if (!scr._trnBound) { scr._trnBound = true; scr.addEventListener('click', trnBracketClick); }
+}
+
+function trnBracketClick(e) {
+  const pickBtn = e.target.closest('[data-pick-r]');
+  if (pickBtn) {
+    const ri = parseInt(pickBtn.dataset.pickR, 10);
+    const mi = parseInt(pickBtn.dataset.pickM, 10);
+    const pk = pickBtn.dataset.pickP;
+    pickTrnWinner(ri, mi, pk);
+    return;
+  }
+  if (e.target.closest('#trn-new-btn')) {
+    if (confirm('Start a new tournament? The current bracket will be cleared.')) {
+      clearTournamentState();
+      updateHomeResumeButton();
+      navigateTo('screen-tournament-setup');
+    }
+  }
+}
+
 // ── Initial renders (direct calls, no navigateTo involved) ───
 renderTrainingSetup();
 renderMatchHistory();
@@ -2493,6 +2868,15 @@ showScreen('screen-home');
 screenStack.length = 0;
 console.log('[boot] showScreen(screen-home) complete — active:',
   document.querySelector('.screen.active') && document.querySelector('.screen.active').id);
+
+// ── Tournament init ────────────────────────────────────
+renderTournamentSetup();
+tournamentState = loadTournamentState();
+updateHomeResumeButton();
+document.getElementById('btn-resume-tournament').addEventListener('click', () => {
+  tournamentState = loadTournamentState();
+  navigateTo('screen-tournament-bracket');
+});
 
 // ── Wrap navigateTo AFTER boot so it cannot fire during init ─
 // Any navigateTo('screen-training') or ('screen-history') call
@@ -2504,6 +2888,17 @@ console.log('[boot] showScreen(screen-home) complete — active:',
     _orig(id);
     if (id === 'screen-history')  renderMatchHistory();
     if (id === 'screen-training') renderTrainingSetup();
+  };
+}());
+
+// ── Tournament navigate wrapper ────────────────────────
+(function(){
+  const _orig = window.navigateTo;
+  window.navigateTo = function(id) {
+    _orig(id);
+    if (id === 'screen-tournament-setup')   renderTournamentSetup();
+    if (id === 'screen-tournament-bracket') renderTournamentBracket();
+    if (id === 'screen-home')               updateHomeResumeButton();
   };
 }());
 
