@@ -634,19 +634,19 @@ renderMatchSetup();
     // ── MAIN TABLE (capped height, scrollable) ────────
     '.sc-table-wrap{flex:1;min-height:0;overflow-y:auto;background:#1a1a1a;}',
     '.sc-table-wrap::-webkit-scrollbar{width:4px;}.sc-table-wrap::-webkit-scrollbar-track{background:#111;}.sc-table-wrap::-webkit-scrollbar-thumb{background:#444;border-radius:2px;}',
-    '.sc-tbl-head{display:grid;grid-template-columns:1fr 1.4fr 48px 1.4fr 1fr;background:#1e1e1e;border-bottom:2px solid #333;position:sticky;top:0;z-index:2;}',
+    '.sc-tbl-head{display:grid;grid-template-columns:1fr 1.4fr 48px 1fr 1.4fr;background:#1e1e1e;border-bottom:2px solid #333;position:sticky;top:0;z-index:2;}',
     '.sc-tbl-head>div{padding:3px 6px;font-size:14px;font-weight:700;color:#888;letter-spacing:1px;text-transform:uppercase;font-family:Arial,sans-serif;display:flex;align-items:center;}',
-    '.sc-tbl-row{display:grid;grid-template-columns:1fr 1.4fr 48px 1.4fr 1fr;border-bottom:1px solid #333;min-height:56px;}',
+    '.sc-tbl-row{display:grid;grid-template-columns:1fr 1.4fr 48px 1fr 1.4fr;border-bottom:1px solid #333;min-height:120px;}',
     '.sc-tbl-row:nth-child(odd){background:#1a1a1a;}',
     '.sc-tbl-row:nth-child(even){background:#222;}',
     '.sc-tbl-row:not(.sc-tbl-start):not(.sc-tbl-pending){cursor:pointer;}',
     '.sc-tbl-row:not(.sc-tbl-start):not(.sc-tbl-pending):hover{background:#2a2a2a;}',
     '.sc-tbl-row>div{padding:3px 6px;font-size:13px;font-family:Arial,sans-serif;color:#ccc;display:flex;align-items:center;}',
-    '.sc-tbl-c1{justify-content:flex-end;font-size:1.8rem;font-weight:700;color:#999;border-right:1px solid #555;overflow:hidden;}',
-    '.sc-tbl-c2{justify-content:flex-end;font-size:2.8rem;font-weight:900;color:#fff;font-family:"Arial Black",Arial,sans-serif;overflow:hidden;}',
+    '.sc-tbl-c1{justify-content:flex-end;font-size:3rem;font-weight:700;color:#999;border-right:1px solid #555;overflow:hidden;}',
+    '.sc-tbl-c2{justify-content:flex-end;font-size:5rem;font-weight:900;color:#fff;font-family:"Arial Black",Arial,sans-serif;overflow:hidden;}',
     '.sc-tbl-c3{justify-content:center;background:#161616;color:#555;font-size:10px;border-left:1px solid #333;border-right:1px solid #333;}',
-    '.sc-tbl-c4{justify-content:flex-start;font-size:2.8rem;font-weight:900;color:#fff;font-family:"Arial Black",Arial,sans-serif;border-right:1px solid #555;overflow:hidden;}',
-    '.sc-tbl-c5{justify-content:flex-start;font-size:1.8rem;font-weight:700;color:#999;overflow:hidden;}',
+    '.sc-tbl-c4{justify-content:flex-start;font-size:5rem;font-weight:900;color:#fff;font-family:"Arial Black",Arial,sans-serif;overflow:hidden;}',
+    '.sc-tbl-c5{justify-content:flex-start;font-size:3rem;font-weight:700;color:#999;border-left:1px solid #555;overflow:hidden;}',
     '.sc-tbl-start{background:#161616!important;cursor:default!important;}',
     '.sc-tbl-start>div{color:#555!important;font-size:11px!important;font-weight:400!important;font-style:italic;}',
     '.sc-tbl-pending{cursor:default!important;}',
@@ -1050,7 +1050,17 @@ function renderVisitHistory() {
   leftVisits.sort((a, b)  => a.v.seq - b.v.seq);
   rightVisits.sort((a, b) => a.v.seq - b.v.seq);
 
-  const rounds = Math.max(leftVisits.length, rightVisits.length);
+  const leftLen    = leftVisits.length;
+  const rightLen   = rightVisits.length;
+  const inputText  = gs.currentInput;
+  const showPending = !!(cp && inputText);
+  const pendingLeft = cp ? cp.side === leftSide : false;
+  let rounds = Math.max(leftLen, rightLen);
+  if (showPending) {
+    const ps = pendingLeft ? leftLen : rightLen;
+    const os = pendingLeft ? rightLen : leftLen;
+    if (ps >= os) rounds = Math.max(rounds, ps + 1);
+  }
 
   // Header + starting row
   let html = `
@@ -1058,51 +1068,38 @@ function renderVisitHistory() {
       <div class="sc-tbl-c1">Scored</div>
       <div class="sc-tbl-c2">To Go</div>
       <div class="sc-tbl-c3">#</div>
-      <div class="sc-tbl-c4">To Go</div>
-      <div class="sc-tbl-c5">Scored</div>
+      <div class="sc-tbl-c4">Scored</div>
+      <div class="sc-tbl-c5">To Go</div>
     </div>
     <div class="sc-tbl-row sc-tbl-start">
       <div class="sc-tbl-c1"></div>
       <div class="sc-tbl-c2">${startScore}</div>
       <div class="sc-tbl-c3">&mdash;</div>
-      <div class="sc-tbl-c4">${startScore}</div>
-      <div class="sc-tbl-c5"></div>
+      <div class="sc-tbl-c4"></div>
+      <div class="sc-tbl-c5">${startScore}</div>
     </div>`;
 
-  // One row per round; centre column shows cumulative dart count (3, 6, 9…)
+  // One row per round; pending input is inlined into the correct slot
   for (let i = 0; i < rounds; i++) {
     const lv = leftVisits[i];
     const rv = rightVisits[i];
-    const c1 = lv ? (lv.v.wasBust ? 'BUST' : String(lv.v.scored)) : '';
+    const lPendHere = showPending && pendingLeft  && !lv && i === leftLen;
+    const rPendHere = showPending && !pendingLeft && !rv && i === rightLen;
+    const isPending = lPendHere || rPendHere;
+    const c1 = lv ? (lv.v.wasBust ? 'BUST' : String(lv.v.scored)) : (lPendHere ? escHtml(inputText) : '');
     const c2 = lv ? String(lv.v.remaining) : '';
-    const c4 = rv ? String(rv.v.remaining) : '';
-    const c5 = rv ? (rv.v.wasBust ? 'BUST' : String(rv.v.scored)) : '';
+    const c4 = rv ? (rv.v.wasBust ? 'BUST' : String(rv.v.scored)) : (rPendHere ? escHtml(inputText) : '');
+    const c5 = rv ? String(rv.v.remaining) : '';
     const lPi = lv ? lv.pi : -1, lVi = lv ? lv.vi : -1;
     const rPi = rv ? rv.pi : -1, rVi = rv ? rv.vi : -1;
     html += `
-      <div class="sc-tbl-row" data-pi="${lPi}" data-vi="${lVi}" data-api="${rPi}" data-avi="${rVi}">
-        <div class="sc-tbl-c1${lv && lv.v.wasBust ? ' sc-tbl-bust' : ''}">${escHtml(c1)}</div>
-        <div class="sc-tbl-c2">${escHtml(c2)}</div>
-        <div class="sc-tbl-c3">${(i + 1) * 3}</div>
-        <div class="sc-tbl-c4">${escHtml(c4)}</div>
-        <div class="sc-tbl-c5${rv && rv.v.wasBust ? ' sc-tbl-bust' : ''}">${escHtml(c5)}</div>
+      <div class="sc-tbl-row${isPending ? ' sc-tbl-pending' : ''}" data-pi="${lPi}" data-vi="${lVi}" data-api="${rPi}" data-avi="${rVi}">
+        <div class="sc-tbl-c1${lv && lv.v.wasBust ? ' sc-tbl-bust' : ''}${lPendHere ? ' sc-tbl-pending-cell' : ''}">${c1}</div>
+        <div class="sc-tbl-c2${lPendHere ? ' sc-tbl-pending-cell' : ''}">${escHtml(c2)}</div>
+        <div class="sc-tbl-c3">${isPending ? '&#9658;' : (i + 1) * 3}</div>
+        <div class="sc-tbl-c4${rv && rv.v.wasBust ? ' sc-tbl-bust' : ''}${rPendHere ? ' sc-tbl-pending-cell' : ''}">${c4}</div>
+        <div class="sc-tbl-c5${rPendHere ? ' sc-tbl-pending-cell' : ''}">${escHtml(c5)}</div>
       </div>`;
-  }
-
-  // Pending input row (only real typed input — never flash messages like BUST!/LEG)
-  if (cp) {
-    const inputText = gs.currentInput;
-    if (inputText) {
-      const isLeft = cp.side === leftSide;
-      html += `
-        <div class="sc-tbl-row sc-tbl-pending">
-          <div class="sc-tbl-c1${isLeft  ? ' sc-tbl-pending-cell' : ''}">${isLeft  ? escHtml(inputText) : ''}</div>
-          <div class="sc-tbl-c2${isLeft  ? ' sc-tbl-pending-cell' : ''}"></div>
-          <div class="sc-tbl-c3">&#9658;</div>
-          <div class="sc-tbl-c4${!isLeft ? ' sc-tbl-pending-cell' : ''}"></div>
-          <div class="sc-tbl-c5${!isLeft ? ' sc-tbl-pending-cell' : ''}">${!isLeft ? escHtml(inputText) : ''}</div>
-        </div>`;
-    }
   }
 
   el.innerHTML = html;
