@@ -2522,6 +2522,8 @@ function saveMatchToHistory() {
     '.trn-champ-label{font-size:0.65rem;letter-spacing:3px;text-transform:uppercase;font-family:Arial,sans-serif;opacity:0.85;margin-bottom:4px;}',
     '.trn-champ-name{font-size:1.8rem;letter-spacing:2px;text-transform:uppercase;font-weight:900;margin-bottom:2px;}',
     '.trn-champ-sub{font-size:0.7rem;font-family:Arial,sans-serif;opacity:0.75;}',
+    '.trn-undo-btn{display:block;width:100%;padding:5px 0;background:rgba(80,80,80,0.15);border:none;border-top:1px solid var(--border);color:#888;font-family:Arial,sans-serif;font-size:0.68rem;letter-spacing:1px;cursor:pointer;text-align:center;-webkit-tap-highlight-color:transparent;}',
+    '.trn-undo-btn:active{background:rgba(80,80,80,0.35);color:#bbb;}',
   ].join('');
   document.head.appendChild(s);
 }());
@@ -2554,9 +2556,17 @@ function trnShuffle(arr) {
 
 function buildBracket(players) {
   const shuffled = trnShuffle(players);
+  const N = shuffled.length;
   let size = 1;
-  while (size < shuffled.length) size *= 2;
-  while (shuffled.length < size) shuffled.push(null); // null = BYE slot
+  while (size < N) size *= 2;
+
+  // Distribute players evenly across all slots; unfilled slots become BYE (null).
+  // Player i lands at floor(i × size / N) — guarantees even spread, no consecutive byes.
+  // e.g. 5 players, 8 slots → [P1,P2,BYE,P3,P4,BYE,P5,BYE]
+  const slots = new Array(size).fill(null); // null = BYE
+  for (let i = 0; i < N; i++) {
+    slots[Math.floor(i * size / N)] = shuffled[i];
+  }
 
   // Build ALL rounds upfront as empty shells — full bracket visible from the start
   const numRounds = Math.round(Math.log2(size));
@@ -2566,8 +2576,8 @@ function buildBracket(players) {
     const round = [];
     for (let i = 0; i < matchCount; i++) {
       if (r === 0) {
-        // Round 0: real players or BYE (null)
-        round.push({ p1: shuffled[i * 2], p2: shuffled[i * 2 + 1], winner: null, resolved: false });
+        // Round 0: real players or BYE (null) — read from evenly-distributed slots
+        round.push({ p1: slots[i * 2], p2: slots[i * 2 + 1], winner: null, resolved: false });
       } else {
         // Later rounds: sides unknown (undefined = TBD) until upstream resolves
         round.push({ p1: undefined, p2: undefined, winner: null, resolved: false });
@@ -2651,7 +2661,48 @@ function pickTrnWinner(roundIdx, matchIdx, playerKey) {
   if (!winner) return; // guard: can't pick a BYE or undefined slot
   match.winner   = winner;
   match.resolved = true;
+  tournamentState.lastPick = { ri: roundIdx, mi: matchIdx };
   trnPropagate(roundIdx, matchIdx, winner);
+  trnUpdateCurrentRound();
+  saveTournamentState();
+  renderTournamentBracket();
+}
+
+// Recursively un-propagate a winner back out of downstream rounds (used by undo)
+function trnUnpropagate(ri, mi, winnerToClear) {
+  const nextRound = tournamentState.rounds[ri + 1];
+  if (!nextRound) return;
+  const nextMi    = Math.floor(mi / 2);
+  const nextMatch = nextRound[nextMi];
+  if (!nextMatch) return;
+  const slot = mi % 2 === 0 ? 'p1' : 'p2';
+  if (nextMatch[slot] !== winnerToClear) return; // safety: only clear what we put there
+  nextMatch[slot] = undefined;
+  if (nextMatch.resolved) {
+    const cascadedWinner = nextMatch.winner;
+    nextMatch.winner   = null;
+    nextMatch.resolved = false;
+    if (cascadedWinner) trnUnpropagate(ri + 1, nextMi, cascadedWinner);
+  }
+}
+
+function undoTrnLastPick() {
+  const ts = tournamentState;
+  if (!ts || !ts.lastPick) return;
+  const { ri, mi } = ts.lastPick;
+  const match = ts.rounds[ri] && ts.rounds[ri][mi];
+  if (!match || !match.resolved) return;
+  const winner = match.winner;
+  // Clear this match
+  match.winner   = null;
+  match.resolved = false;
+  // Un-propagate the winner out of the next round (and any cascade)
+  trnUnpropagate(ri, mi, winner);
+  // Reset tracking state
+  ts.lastPick  = null;
+  ts.champion  = null;
+  // Recompute currentRound from the beginning
+  ts.currentRound = 0;
   trnUpdateCurrentRound();
   saveTournamentState();
   renderTournamentBracket();
@@ -2828,8 +2879,12 @@ function renderTournamentBracket() {
         <div class="page-title" style="margin-bottom:0;text-align:left;font-size:1.3rem;">Tournament</div>
         <div class="page-subtitle" style="margin-bottom:0;text-align:left;">${ts.players.length} players</div>
       </div>
-      <button class="btn btn-danger btn-sm" id="trn-new-btn"
-              style="width:auto;min-width:90px;flex-shrink:0;">New &#10005;</button>
+      <div style="display:flex;gap:6px;flex-shrink:0;">
+        <button class="btn btn-ghost btn-sm" id="trn-home-btn"
+                style="width:auto;min-width:68px;">&#127968; Home</button>
+        <button class="btn btn-danger btn-sm" id="trn-new-btn"
+                style="width:auto;min-width:68px;">New &#10005;</button>
+      </div>
     </div>
   `;
 
@@ -2870,9 +2925,10 @@ function renderTournamentBracket() {
       const p1cls  = p1Tbd ? ' bp-tbd' : p1Null ? ' bp-bye' : p1Win ? ' bp-win' : (match.winner ? ' bp-out' : '');
       const p2cls  = p2Tbd ? ' bp-tbd' : p2Null ? ' bp-bye' : p2Win ? ' bp-win' : (match.winner ? ' bp-out' : '');
       // Only allow picks on the active round, both sides must be real players, match not yet resolved
-      const canPick = isActive && !match.resolved && !p1Tbd && !p2Tbd && !p1Null && !p2Null;
-      const p1attr  = canPick ? `data-pick-r="${ri}" data-pick-m="${mi}" data-pick-p="p1"` : 'disabled';
-      const p2attr  = canPick ? `data-pick-r="${ri}" data-pick-m="${mi}" data-pick-p="p2"` : 'disabled';
+      const canPick    = isActive && !match.resolved && !p1Tbd && !p2Tbd && !p1Null && !p2Null;
+      const isLastPick = ts.lastPick && ts.lastPick.ri === ri && ts.lastPick.mi === mi;
+      const p1attr     = canPick ? `data-pick-r="${ri}" data-pick-m="${mi}" data-pick-p="p1"` : 'disabled';
+      const p2attr     = canPick ? `data-pick-r="${ri}" data-pick-m="${mi}" data-pick-p="p2"` : 'disabled';
 
       html += `
         <div class="bracket-slot" style="flex:${slotFlex};">
@@ -2880,6 +2936,7 @@ function renderTournamentBracket() {
             <button class="bracket-player${p1cls}" ${p1attr}>${escHtml(p1Name)}</button>
             <div class="bracket-vs">vs</div>
             <button class="bracket-player${p2cls}" ${p2attr}>${escHtml(p2Name)}</button>
+            ${isLastPick ? `<button class="trn-undo-btn" data-trn-undo="1">&#8617; Undo</button>` : ''}
           </div>
         </div>
       `;
@@ -2904,6 +2961,14 @@ function trnBracketClick(e) {
     const mi = parseInt(pickBtn.dataset.pickM, 10);
     const pk = pickBtn.dataset.pickP;
     pickTrnWinner(ri, mi, pk);
+    return;
+  }
+  if (e.target.closest('[data-trn-undo]')) {
+    undoTrnLastPick();
+    return;
+  }
+  if (e.target.closest('#trn-home-btn')) {
+    navigateTo('screen-home');
     return;
   }
   if (e.target.closest('#trn-new-btn')) {
