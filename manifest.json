@@ -1,7 +1,8 @@
 {
-  "name": "PHD Darts",
-  "short_name": "PHD Darts",
-  "start_url": "/",
+  "name": "PHD Scoring",
+  "short_name": "PHD Scoring",
+  "start_url": "https://cynffonbusiness.github.io/phd-scoring/",
+  "scope": "https://cynffonbusiness.github.io/phd-scoring/",
   "display": "standalone",
   "background_color": "#111111",
   "theme_color": "#E8520A",
