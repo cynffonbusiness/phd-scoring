@@ -676,14 +676,14 @@ renderMatchSetup();
     '.sc-input-val.bust-flash{color:var(--danger)!important;}',
     '.sc-input-val.leg-flash{color:var(--success)!important;}',
     '.sc-action-row{display:grid;grid-template-columns:1fr 1fr;gap:3px;}',
-    '.sc-action-row .numpad-btn{min-height:36px;border-radius:7px;border:1px solid var(--border);background:#1a1a1a;color:#fff;font-size:13px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;-webkit-tap-highlight-color:transparent;}',
+    '.sc-action-row .numpad-btn{min-height:72px;border-radius:7px;border:1px solid var(--border);background:#1a1a1a;color:#fff;font-size:1.8rem;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;-webkit-tap-highlight-color:transparent;touch-action:manipulation;}',
     '.sc-action-row .numpad-btn:active{background:#2a2a2a;}',
     '.sc-action-row .numpad-bust{background:#1a0a0a!important;border-color:var(--danger)!important;color:var(--danger)!important;}',
     '.sc-action-row .numpad-undo{background:#1a1a2a!important;border-color:#555!important;color:#aaa!important;}',
     '#sc-numpad{display:grid;grid-template-columns:repeat(3,1fr);gap:3px;}',
-    '#sc-numpad .numpad-btn{min-height:44px;border-radius:7px;border:1px solid var(--border);background:#1a1a1a;color:#fff;font-size:22px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;-webkit-tap-highlight-color:transparent;}',
+    '#sc-numpad .numpad-btn{min-height:72px;border-radius:7px;border:1px solid var(--border);background:#1a1a1a;color:#fff;font-size:1.8rem;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;-webkit-tap-highlight-color:transparent;touch-action:manipulation;}',
     '#sc-numpad .numpad-btn:active{background:#2a2a2a;}',
-    '#sc-numpad .numpad-confirm{background:var(--accent);border-color:var(--accent);font-size:20px;}',
+    '#sc-numpad .numpad-confirm{background:var(--accent);border-color:var(--accent);}',
     '#sc-numpad .numpad-del{background:#2a1a1a;border-color:var(--danger);color:var(--danger);}',
   ].join('');
   document.head.appendChild(s);
