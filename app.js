@@ -2635,20 +2635,12 @@ function trnPropagate(ri, mi, winner) {
   trnTryResolve(ri + 1, nextMi); // both sides now known? try to auto-resolve
 }
 
-// Walk currentRound forward past fully-resolved rounds; set champion when final is done
+// Detect champion from the final match directly (supports free-order play)
 function trnUpdateCurrentRound() {
   const ts = tournamentState;
-  while (ts.currentRound < ts.rounds.length) {
-    const round = ts.rounds[ts.currentRound];
-    if (round.every(m => m.resolved)) {
-      if (ts.currentRound === ts.rounds.length - 1) {
-        ts.champion = round[0].winner; // final resolved — set champion
-        break;
-      }
-      ts.currentRound++;
-    } else {
-      break; // round has outstanding picks
-    }
+  const finalMatch = ts.rounds[ts.rounds.length - 1][0];
+  if (finalMatch && finalMatch.resolved && finalMatch.winner) {
+    ts.champion = finalMatch.winner;
   }
 }
 
@@ -2661,7 +2653,6 @@ function pickTrnWinner(roundIdx, matchIdx, playerKey) {
   if (!winner) return; // guard: can't pick a BYE or undefined slot
   match.winner   = winner;
   match.resolved = true;
-  tournamentState.lastPick = { ri: roundIdx, mi: matchIdx };
   trnPropagate(roundIdx, matchIdx, winner);
   trnUpdateCurrentRound();
   saveTournamentState();
@@ -2686,23 +2677,21 @@ function trnUnpropagate(ri, mi, winnerToClear) {
   }
 }
 
-function undoTrnLastPick() {
+function undoTrnMatch(ri, mi) {
   const ts = tournamentState;
-  if (!ts || !ts.lastPick) return;
-  const { ri, mi } = ts.lastPick;
+  if (!ts) return;
   const match = ts.rounds[ri] && ts.rounds[ri][mi];
   if (!match || !match.resolved) return;
+  // Only undo user-picked matches — BYE auto-resolutions are not undoable
+  if (match.p1 === null || match.p2 === null) return;
   const winner = match.winner;
   // Clear this match
   match.winner   = null;
   match.resolved = false;
-  // Un-propagate the winner out of the next round (and any cascade)
+  // Un-propagate the winner out of downstream rounds recursively
   trnUnpropagate(ri, mi, winner);
-  // Reset tracking state
-  ts.lastPick  = null;
-  ts.champion  = null;
-  // Recompute currentRound from the beginning
-  ts.currentRound = 0;
+  // Clear champion (re-detected below if final is still somehow resolved)
+  ts.champion = null;
   trnUpdateCurrentRound();
   saveTournamentState();
   renderTournamentBracket();
@@ -2902,9 +2891,12 @@ function renderTournamentBracket() {
   html += `<div class="bracket-scroll"><div class="bracket-container">`;
 
   ts.rounds.forEach((round, ri) => {
-    const slotFlex  = r0.length / round.length;
-    const isActive  = ri === ts.currentRound && !ts.champion;
-    const label     = trnRoundLabel(ri, totalRounds);
+    const slotFlex = r0.length / round.length;
+    const label    = trnRoundLabel(ri, totalRounds);
+    // A round is "active" (highlighted) if it has at least one match ready to play
+    const isActive = !ts.champion && round.some(m =>
+      !m.resolved && m.p1 !== undefined && m.p2 !== undefined && m.p1 !== null && m.p2 !== null
+    );
 
     html += `
       <div class="bracket-round${isActive ? ' bracket-round-active' : ''}">
@@ -2924,11 +2916,12 @@ function renderTournamentBracket() {
       const p2Win  = !!(match.winner && match.winner === match.p2);
       const p1cls  = p1Tbd ? ' bp-tbd' : p1Null ? ' bp-bye' : p1Win ? ' bp-win' : (match.winner ? ' bp-out' : '');
       const p2cls  = p2Tbd ? ' bp-tbd' : p2Null ? ' bp-bye' : p2Win ? ' bp-win' : (match.winner ? ' bp-out' : '');
-      // Only allow picks on the active round, both sides must be real players, match not yet resolved
-      const canPick    = isActive && !match.resolved && !p1Tbd && !p2Tbd && !p1Null && !p2Null;
-      const isLastPick = ts.lastPick && ts.lastPick.ri === ri && ts.lastPick.mi === mi;
-      const p1attr     = canPick ? `data-pick-r="${ri}" data-pick-m="${mi}" data-pick-p="p1"` : 'disabled';
-      const p2attr     = canPick ? `data-pick-r="${ri}" data-pick-m="${mi}" data-pick-p="p2"` : 'disabled';
+      // Pickable: both players are real and known, match not yet resolved, no champion yet
+      const canPick      = !ts.champion && !match.resolved && !p1Tbd && !p2Tbd && !p1Null && !p2Null;
+      // Undoable: user-resolved match (both sides were real players, not a BYE auto-resolve)
+      const isUserResolved = match.resolved && !p1Null && !p2Null && !p1Tbd && !p2Tbd;
+      const p1attr       = canPick ? `data-pick-r="${ri}" data-pick-m="${mi}" data-pick-p="p1"` : 'disabled';
+      const p2attr       = canPick ? `data-pick-r="${ri}" data-pick-m="${mi}" data-pick-p="p2"` : 'disabled';
 
       html += `
         <div class="bracket-slot" style="flex:${slotFlex};">
@@ -2936,7 +2929,7 @@ function renderTournamentBracket() {
             <button class="bracket-player${p1cls}" ${p1attr}>${escHtml(p1Name)}</button>
             <div class="bracket-vs">vs</div>
             <button class="bracket-player${p2cls}" ${p2attr}>${escHtml(p2Name)}</button>
-            ${isLastPick ? `<button class="trn-undo-btn" data-trn-undo="1">&#8617; Undo</button>` : ''}
+            ${isUserResolved ? `<button class="trn-undo-btn" data-trn-undo-r="${ri}" data-trn-undo-m="${mi}">&#8617; Undo</button>` : ''}
           </div>
         </div>
       `;
@@ -2963,8 +2956,9 @@ function trnBracketClick(e) {
     pickTrnWinner(ri, mi, pk);
     return;
   }
-  if (e.target.closest('[data-trn-undo]')) {
-    undoTrnLastPick();
+  const undoBtn = e.target.closest('[data-trn-undo-r]');
+  if (undoBtn) {
+    undoTrnMatch(parseInt(undoBtn.dataset.trnUndoR, 10), parseInt(undoBtn.dataset.trnUndoM, 10));
     return;
   }
   if (e.target.closest('#trn-home-btn')) {
