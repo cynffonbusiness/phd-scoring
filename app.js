@@ -1,0 +1,2438 @@
+console.log('Script 1 starting');
+/* ============================================================
+   PHD — Navigation + Players roster
+   Phase 2 JS (scoring, stats, history, training: future passes)
+============================================================ */
+
+// ── Override dev-preview CSS (stacked screens → single active screen) ──
+(function () {
+  const s = document.createElement('style');
+  s.textContent = [
+    /* Force body to a definite height so flex:1 on .screens distributes correctly.
+       Without this, body height is auto (only the header is in-flow), .screens
+       collapses to 0px, and overflow:hidden clips all screen content. */
+    'html{height:100%!important}',
+    'body{height:100vh!important;overflow:hidden!important}',
+    '.screens{height:calc(100vh - 64px)!important;flex:none!important;' +
+      'position:relative!important;overflow:hidden!important}',
+    '.screen{display:none!important;position:absolute!important;',
+    'inset:0!important;min-height:unset!important;overflow-y:auto!important}',
+    '.screen.active{display:flex!important}',
+    '.dev-section{display:none!important}',
+  ].join('');
+  document.head.appendChild(s);
+}());
+
+// ── Navigation ──────────────────────────────────────────────
+const screenStack = [];
+
+function showScreen(id) {
+  // Directly set display on every screen so no CSS rule can override
+  document.querySelectorAll('.screen').forEach(s => {
+    s.style.display = 'none';
+    s.classList.remove('active');
+  });
+  const target = document.getElementById(id);
+  if (target) {
+    target.style.display = 'flex';
+    target.classList.add('active');
+    target.scrollTop = 0;
+  }
+  document.getElementById('btn-back').style.display =
+    screenStack.length ? 'block' : 'none';
+}
+
+function navigateTo(id) {
+  console.trace('[navigateTo] → ' + id);
+  const active = document.querySelector('.screen.active');
+  if (active) screenStack.push(active.id);
+  showScreen(id);
+}
+
+function navigateBack() {
+  if (!screenStack.length) return;
+  showScreen(screenStack.pop());
+  // keep back button visible only if there's still history
+  document.getElementById('btn-back').style.display =
+    screenStack.length ? 'block' : 'none';
+}
+
+// Home mega-buttons + any [data-target] button
+document.querySelectorAll('[data-target]').forEach(btn => {
+  btn.addEventListener('click', () => navigateTo(btn.dataset.target));
+});
+
+document.getElementById('btn-back').addEventListener('click', navigateBack);
+
+// ── Players — localStorage helpers ──────────────────────────
+const STORAGE_KEY = 'phd_players';
+
+function getPlayers() {
+  try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]'); }
+  catch { return []; }
+}
+
+function setPlayers(arr) {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(arr));
+}
+
+function makeId() {
+  return Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+}
+
+function initials(name) {
+  return name.trim().split(/\s+/)
+    .map(w => w[0].toUpperCase())
+    .slice(0, 2).join('');
+}
+
+function formatDate(iso) {
+  const d = new Date(iso);
+  return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+// ── Players — render ─────────────────────────────────────────
+function renderPlayers(filter) {
+  filter = (filter || '').trim().toLowerCase();
+  const players = getPlayers();
+  const shown = filter
+    ? players.filter(p => p.name.toLowerCase().includes(filter))
+    : players;
+  const list = document.getElementById('player-list');
+
+  if (!shown.length) {
+    list.innerHTML =
+      '<div class="empty-state">' +
+        '<div class="empty-icon">&#128101;</div>' +
+        '<div class="empty-text">' +
+          (filter ? 'No players match your search.' :
+                    'No players yet.<br>Add your first player below.') +
+        '</div>' +
+      '</div>';
+    return;
+  }
+
+  list.innerHTML = shown.map(p => {
+    const ini = initials(p.name);
+    const added = p.added ? 'Added ' + formatDate(p.added) : '';
+    return (
+      '<div class="player-item" data-player-id="' + p.id + '">' +
+        '<div class="player-avatar">' + ini + '</div>' +
+        '<div class="player-info">' +
+          '<div class="player-name">' + escHtml(p.name) + '</div>' +
+          '<div class="player-stats-line">' + escHtml(added) + '</div>' +
+        '</div>' +
+        '<div class="player-actions">' +
+          '<button class="icon-btn" data-edit="' + p.id + '" title="Edit">&#9999;</button>' +
+          '<button class="icon-btn delete" data-delete="' + p.id + '" title="Delete">&#128465;</button>' +
+        '</div>' +
+      '</div>'
+    );
+  }).join('');
+}
+
+function escHtml(str) {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+// ── Players — inline edit ────────────────────────────────────
+function activateInlineEdit(item, playerId) {
+  const players = getPlayers();
+  const player = players.find(p => p.id === playerId);
+  if (!player) return;
+
+  // swap name to input
+  item.querySelector('.player-name').innerHTML =
+    '<input class="form-input" id="inline-edit-input" ' +
+    'style="min-height:40px;padding:8px 12px;font-size:1rem;" ' +
+    'value="' + escHtml(player.name) + '" maxlength="32"/>';
+
+  // swap action buttons to save/cancel
+  item.querySelector('.player-actions').innerHTML =
+    '<button class="icon-btn" data-save="' + playerId + '" ' +
+    'title="Save" style="color:var(--success);border-color:var(--success);">&#10003;</button>' +
+    '<button class="icon-btn" data-cancel="' + playerId + '" title="Cancel">&#10005;</button>';
+
+  const input = document.getElementById('inline-edit-input');
+  input.focus();
+  input.select();
+
+  // save on Enter
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Enter') commitEdit(playerId);
+    if (e.key === 'Escape') renderPlayers(currentSearch());
+  });
+}
+
+function commitEdit(playerId) {
+  const input = document.getElementById('inline-edit-input');
+  if (!input) return;
+  const newName = input.value.trim();
+  if (!newName) { input.focus(); return; }
+  const players = getPlayers();
+  const idx = players.findIndex(p => p.id === playerId);
+  if (idx !== -1) { players[idx].name = newName; setPlayers(players); }
+  renderPlayers(currentSearch());
+}
+
+function currentSearch() {
+  return (document.getElementById('player-search') || {}).value || '';
+}
+
+// ── Players — event delegation on list ──────────────────────
+document.getElementById('player-list').addEventListener('click', e => {
+  const editBtn   = e.target.closest('[data-edit]');
+  const deleteBtn = e.target.closest('[data-delete]');
+  const saveBtn   = e.target.closest('[data-save]');
+  const cancelBtn = e.target.closest('[data-cancel]');
+
+  if (editBtn) {
+    const id = editBtn.dataset.edit;
+    const item = editBtn.closest('.player-item');
+    activateInlineEdit(item, id);
+    return;
+  }
+
+  if (saveBtn) {
+    commitEdit(saveBtn.dataset.save);
+    return;
+  }
+
+  if (cancelBtn) {
+    renderPlayers(currentSearch());
+    return;
+  }
+
+  if (deleteBtn) {
+    const id = deleteBtn.dataset.delete;
+    setPlayers(getPlayers().filter(p => p.id !== id));
+    renderPlayers(currentSearch());
+    return;
+  }
+});
+
+// ── Players — search ─────────────────────────────────────────
+document.getElementById('player-search').addEventListener('input', function () {
+  renderPlayers(this.value);
+});
+
+// ── Players — add via modal ──────────────────────────────────
+function openAddModal() {
+  document.getElementById('modal-player-title').textContent = 'Add Player';
+  document.getElementById('modal-player-name').value = '';
+  document.getElementById('modal-player-nickname').value = '';
+  document.getElementById('modal-player').classList.add('open');
+  document.getElementById('modal-player-name').focus();
+}
+
+function closeModal() {
+  document.getElementById('modal-player').classList.remove('open');
+}
+
+document.getElementById('btn-add-player').addEventListener('click', openAddModal);
+document.getElementById('btn-cancel-player').addEventListener('click', closeModal);
+
+// Close modal on overlay click (outside the sheet)
+document.getElementById('modal-player').addEventListener('click', function (e) {
+  if (e.target === this) closeModal();
+});
+
+document.getElementById('btn-save-player').addEventListener('click', saveNewPlayer);
+
+document.getElementById('modal-player-name').addEventListener('keydown', e => {
+  if (e.key === 'Enter') saveNewPlayer();
+  if (e.key === 'Escape') closeModal();
+});
+
+function saveNewPlayer() {
+  const nameInput = document.getElementById('modal-player-name');
+  const name = nameInput.value.trim();
+  if (!name) {
+    nameInput.focus();
+    nameInput.style.borderColor = 'var(--danger)';
+    setTimeout(() => { nameInput.style.borderColor = ''; }, 1200);
+    return;
+  }
+  const players = getPlayers();
+  players.push({ id: makeId(), name, added: new Date().toISOString() });
+  setPlayers(players);
+  closeModal();
+  renderPlayers(currentSearch());
+}
+
+// ── Boot ─────────────────────────────────────────────────────
+(function init() {
+  showScreen('screen-home');
+  renderPlayers();
+}());
+
+/* ============================================================
+   PHD — Match State + Game Assignment  (Phase 3)
+============================================================ */
+
+// ── CSS for new components ───────────────────────────────────
+(function () {
+  const s = document.createElement('style');
+  s.textContent =
+    '.match-points-bar{display:flex;align-items:center;justify-content:space-between;' +
+      'background:#0a0a0a;border:2px solid var(--border);border-radius:var(--radius);padding:14px 20px}' +
+    '.points-side{text-align:center}' +
+    '.points-team{font-size:0.65rem;color:var(--text-muted);letter-spacing:2px;text-transform:uppercase;' +
+      'font-family:Arial,sans-serif}' +
+    '.points-score{font-size:2.2rem;color:var(--accent);line-height:1.1}' +
+    '.points-sep{font-size:1.2rem;color:var(--text-muted);font-family:Arial,sans-serif}' +
+    '.game-header{background:var(--bg-card);border:2px solid var(--accent);' +
+      'border-radius:var(--radius-lg);padding:16px;text-align:center}' +
+    '.game-num{font-size:0.65rem;color:var(--text-muted);letter-spacing:3px;' +
+      'text-transform:uppercase;font-family:Arial,sans-serif;margin-bottom:6px}' +
+    '.game-format-title{font-size:1.6rem;color:var(--accent);letter-spacing:1px}' +
+    '.game-meta{font-size:0.75rem;color:var(--text-dim);font-family:Arial,sans-serif;' +
+      'font-weight:400;margin-top:6px}' +
+    '.roster-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:4px}' +
+    '.roster-btn{background:var(--bg-raised);border:2px solid var(--border);' +
+      'border-radius:var(--radius);color:var(--text);font-family:Arial,sans-serif;' +
+      'font-weight:700;font-size:0.85rem;padding:10px 6px;cursor:pointer;text-align:center;' +
+      'transition:background 0.12s,border-color 0.12s;min-height:48px;' +
+      '-webkit-tap-highlight-color:transparent;line-height:1.2}' +
+    '.roster-btn.selected{background:var(--accent);border-color:var(--accent);color:#fff}' +
+    '.roster-btn.disabled{opacity:0.28;pointer-events:none}' +
+    '.selection-chips{display:flex;flex-wrap:wrap;gap:6px;min-height:28px;' +
+      'padding:6px 0;align-items:center}' +
+    '.chip{display:inline-flex;align-items:center;gap:6px;background:var(--accent);' +
+      'color:#fff;border-radius:99px;padding:5px 8px 5px 12px;font-size:0.8rem;' +
+      'font-family:Arial,sans-serif}' +
+    '.chip-remove{background:none;border:none;color:rgba(255,255,255,0.75);cursor:pointer;' +
+      'font-size:1rem;line-height:1;padding:0;display:flex;align-items:center}' +
+    '.chip-remove:hover{color:#fff}' +
+    '.gs-section-label{font-size:0.65rem;color:var(--text-muted);letter-spacing:2px;' +
+      'text-transform:uppercase;font-family:Arial,sans-serif;margin-bottom:10px}' +
+    '.gs-card{background:var(--bg-card);border:1px solid var(--border);' +
+      'border-radius:var(--radius-lg);padding:16px;display:flex;flex-direction:column;gap:12px}';
+  document.head.appendChild(s);
+}());
+
+// ── Match State ──────────────────────────────────────────────
+const matchState = {
+  homeTeam: 'PHD',
+  awayTeam: '',
+  currentGame: 1,
+  points: { home: 0, away: 0 },
+  games: []   // { gameNum, format, phd:[], opp:[], winner:null }
+};
+
+// ── Fixed game format schedule ───────────────────────────────
+const GAME_FORMATS = [
+  { num:1, label:'Fours',   score:801, legs:1, players:4, throw:'away' },
+  { num:2, label:'Triples', score:701, legs:1, players:3, throw:'home' },
+  { num:3, label:'Doubles', score:601, legs:1, players:2, throw:'away' },
+  { num:4, label:'Doubles', score:601, legs:1, players:2, throw:'home' },
+  { num:5, label:'Singles', score:501, legs:3, players:1, throw:'away' },
+  { num:6, label:'Singles', score:501, legs:3, players:1, throw:'home' },
+  { num:7, label:'Singles', score:501, legs:3, players:1, throw:'away' },
+  { num:8, label:'Singles', score:501, legs:3, players:1, throw:'home' },
+  { num:9, label:'Singles', score:501, legs:3, players:1, throw:'away' },
+];
+
+// ── Match Setup Screen ───────────────────────────────────────
+function renderMatchSetup() {
+  document.getElementById('screen-match-setup').innerHTML = `
+    <div>
+      <div class="page-title">Match Night</div>
+      <div class="page-subtitle">Set up tonight's fixture</div>
+    </div>
+    <div class="form-group">
+      <label class="form-label" for="ms-home">PHD Team Name</label>
+      <input class="form-input" id="ms-home" type="text"
+             value="${escHtml(matchState.homeTeam)}"
+             placeholder="PHD" maxlength="24"/>
+    </div>
+    <div class="form-group">
+      <label class="form-label" for="ms-away">Opponents</label>
+      <input class="form-input" id="ms-away" type="text"
+             value="${escHtml(matchState.awayTeam)}"
+             placeholder="Opponent team name" maxlength="24"/>
+    </div>
+    <div class="mt-auto">
+      <button class="btn btn-primary" id="btn-begin-match">
+        &#127919;&nbsp; Begin Match Night
+      </button>
+    </div>`;
+
+  document.getElementById('ms-away').addEventListener('keydown', e => {
+    if (e.key === 'Enter') beginMatch();
+  });
+  document.getElementById('ms-home').addEventListener('keydown', e => {
+    if (e.key === 'Enter') document.getElementById('ms-away').focus();
+  });
+  document.getElementById('btn-begin-match').addEventListener('click', beginMatch);
+}
+
+function beginMatch() {
+  const home = (document.getElementById('ms-home').value || '').trim() || 'PHD';
+  const away = (document.getElementById('ms-away').value || '').trim();
+  if (!away) {
+    flashRed(document.getElementById('ms-away'));
+    return;
+  }
+  matchState.homeTeam  = home;
+  matchState.awayTeam  = away;
+  matchState.currentGame = 1;
+  matchState.points    = { home: 0, away: 0 };
+  matchState.games     = [];
+  navigateTo('screen-game-setup');
+  renderGameSetup();
+}
+
+// Re-render each time user taps "Start Match" from home
+document.querySelector('[data-target="screen-match-setup"]')
+  .addEventListener('click', renderMatchSetup);
+
+// ── Game Assignment Screen ───────────────────────────────────
+let phdSelected = [];   // ordered array of names chosen for PHD side
+
+function renderGameSetup() {
+  phdSelected = [];
+  const gn   = matchState.currentGame;
+  const fmt  = GAME_FORMATS[gn - 1];
+  const scr  = document.getElementById('screen-game-setup');
+
+  const throwTeam = fmt.throw === 'home' ? matchState.homeTeam : matchState.awayTeam;
+  const legLabel  = fmt.legs === 1 ? 'Single leg' : `Best of ${fmt.legs} legs`;
+  const plural    = fmt.players > 1;
+
+  // Opponent inputs
+  const oppInputsHtml = Array.from({ length: fmt.players }, (_, i) => `
+    <div class="form-group">
+      <label class="form-label" for="opp-${i + 1}">
+        ${plural ? `Opponent ${i + 1}` : 'Opponent name'}
+      </label>
+      <input class="form-input" id="opp-${i + 1}" type="text"
+             placeholder="Name" maxlength="32"/>
+    </div>`).join('');
+
+  // PHD roster grid
+  const players = getPlayers();
+  const rosterHtml = players.length
+    ? `<div class="roster-grid" id="roster-grid">
+        ${players.map(p =>
+          `<button class="roster-btn" data-roster-name="${escHtml(p.name)}">
+            ${escHtml(p.name)}
+          </button>`
+        ).join('')}
+       </div>`
+    : `<p style="font-size:0.8rem;color:var(--text-muted);font-family:Arial,sans-serif;
+               text-align:center;padding:6px 0;">
+         No roster saved — use the name input below.
+       </p>`;
+
+  scr.innerHTML = `
+    <!-- Running points bar -->
+    <div class="match-points-bar">
+      <div class="points-side">
+        <div class="points-team">${escHtml(matchState.homeTeam)}</div>
+        <div class="points-score">${matchState.points.home}</div>
+      </div>
+      <div class="points-sep">&#8212;</div>
+      <div class="points-side">
+        <div class="points-team">${escHtml(matchState.awayTeam)}</div>
+        <div class="points-score">${matchState.points.away}</div>
+      </div>
+    </div>
+
+    <!-- Game header -->
+    <div class="game-header">
+      <div class="game-num">Game ${gn} of 9</div>
+      <div class="game-format-title">${fmt.label} &mdash; ${fmt.score}</div>
+      <div class="game-meta">
+        ${legLabel} &nbsp;&bull;&nbsp;
+        ${escHtml(throwTeam)} throws first
+      </div>
+    </div>
+
+    <!-- PHD side -->
+    <div class="gs-card" id="phd-card">
+      <div class="gs-section-label">
+        ${escHtml(matchState.homeTeam)} &mdash;
+        Select ${fmt.players} ${plural ? 'players' : 'player'}
+      </div>
+      ${rosterHtml}
+      <div class="selection-chips" id="phd-chips">
+        <span style="font-size:0.75rem;color:var(--text-muted);font-family:Arial,sans-serif;">
+          No players selected
+        </span>
+      </div>
+      <div style="display:flex;gap:8px;align-items:stretch;">
+        <input class="form-input" id="phd-name-input" type="text"
+               placeholder="Type a name instead" maxlength="32"
+               style="min-height:48px;padding:10px 14px;font-size:0.95rem;"/>
+        <button class="btn btn-ghost" id="btn-add-phd-name"
+                style="flex:0 0 auto;width:56px;min-height:48px;padding:0;
+                       font-size:1.4rem;border-radius:var(--radius);">+</button>
+      </div>
+    </div>
+
+    <!-- Opponent side -->
+    <div class="gs-card">
+      <div class="gs-section-label">${escHtml(matchState.awayTeam)}</div>
+      ${oppInputsHtml}
+    </div>
+
+    <!-- Start button -->
+    <button class="btn btn-primary" id="btn-start-game" style="margin-top:auto;">
+      &#127919;&nbsp; Start Game ${gn}
+    </button>`;
+
+  attachGameSetupListeners(fmt);
+}
+
+function attachGameSetupListeners(fmt) {
+  // Roster grid: tap to toggle selection
+  const grid = document.getElementById('roster-grid');
+  if (grid) {
+    grid.addEventListener('click', e => {
+      const btn = e.target.closest('.roster-btn');
+      if (!btn || btn.classList.contains('disabled')) return;
+      togglePhdPlayer(btn.dataset.rosterName, fmt.players);
+    });
+  }
+
+  // Typed name input
+  const nameInput = document.getElementById('phd-name-input');
+  function addTypedName() {
+    const name = nameInput.value.trim();
+    if (!name || phdSelected.length >= fmt.players) return;
+    phdSelected.push(name);
+    nameInput.value = '';
+    refreshPhdUI(fmt.players);
+    nameInput.focus();
+  }
+  document.getElementById('btn-add-phd-name').addEventListener('click', addTypedName);
+  nameInput.addEventListener('keydown', e => { if (e.key === 'Enter') addTypedName(); });
+
+  // Start game
+  document.getElementById('btn-start-game').addEventListener('click', () => startGame(fmt));
+}
+
+function togglePhdPlayer(name, max) {
+  const idx = phdSelected.indexOf(name);
+  if (idx !== -1) {
+    phdSelected.splice(idx, 1);
+  } else if (phdSelected.length < max) {
+    phdSelected.push(name);
+  }
+  refreshPhdUI(max);
+}
+
+function refreshPhdUI(max) {
+  const chipsEl = document.getElementById('phd-chips');
+  if (chipsEl) {
+    if (phdSelected.length) {
+      chipsEl.innerHTML = phdSelected.map((n, i) =>
+        `<div class="chip">
+           ${max > 1 ? `<span style="opacity:0.7;font-size:0.7rem;">${i + 1}.</span>` : ''}
+           ${escHtml(n)}
+           <button class="chip-remove" data-idx="${i}" title="Remove">&#10005;</button>
+         </div>`
+      ).join('');
+      chipsEl.querySelectorAll('.chip-remove').forEach(btn => {
+        btn.addEventListener('click', () => {
+          phdSelected.splice(parseInt(btn.dataset.idx), 1);
+          refreshPhdUI(max);
+        });
+      });
+    } else {
+      chipsEl.innerHTML =
+        '<span style="font-size:0.75rem;color:var(--text-muted);font-family:Arial,sans-serif;">' +
+        'No players selected</span>';
+    }
+  }
+
+  // Sync roster button states
+  const grid = document.getElementById('roster-grid');
+  if (grid) {
+    const full = phdSelected.length >= max;
+    grid.querySelectorAll('.roster-btn').forEach(btn => {
+      const isSel = phdSelected.includes(btn.dataset.rosterName);
+      btn.classList.toggle('selected', isSel);
+      btn.classList.toggle('disabled', full && !isSel);
+    });
+  }
+}
+
+function startGame(fmt) {
+  // Validate PHD selection
+  if (phdSelected.length < fmt.players) {
+    const card = document.getElementById('phd-card');
+    if (card) {
+      card.style.borderColor = 'var(--danger)';
+      card.style.borderWidth = '2px';
+      setTimeout(() => { card.style.borderColor = ''; card.style.borderWidth = ''; }, 1200);
+    }
+    return;
+  }
+
+  // Validate opponent inputs
+  const oppNames = [];
+  for (let i = 1; i <= fmt.players; i++) {
+    const inp = document.getElementById('opp-' + i);
+    const val = inp ? inp.value.trim() : '';
+    if (!val) { flashRed(inp); return; }
+    oppNames.push(val);
+  }
+
+  // Persist into matchState
+  matchState.games[matchState.currentGame - 1] = {
+    gameNum: matchState.currentGame,
+    format:  Object.assign({}, fmt),
+    phd:     phdSelected.slice(),
+    opp:     oppNames,
+    winner:  null
+  };
+
+  // Navigate to scoring (logic added next pass)
+  navigateTo('screen-scoring');
+}
+
+// ── Shared utility ───────────────────────────────────────────
+function flashRed(el) {
+  if (!el) return;
+  el.style.borderColor = 'var(--danger)';
+  if (el.focus) el.focus();
+  setTimeout(() => { el.style.borderColor = ''; }, 1200);
+}
+
+// ── Init this phase ──────────────────────────────────────────
+renderMatchSetup();
+
+/* ══════════════════════════════════════════════════════
+   PHASE 4 — SCORING ENGINE
+══════════════════════════════════════════════════════ */
+
+// ── CSS injection ─────────────────────────────────────
+(function(){
+  const s = document.createElement('style');
+  s.textContent = [
+    // Screen container
+    '#screen-scoring{overflow:hidden!important;padding:8px 0 0!important;gap:0!important;display:flex;flex-direction:column;}',
+
+    // ── TOP BAR (3 sections: home | legs | away) ──────
+    '.sc-topbar{background:#0a0a0a;border-bottom:1px solid var(--border);display:flex;align-items:stretch;flex-shrink:0;min-height:50px;}',
+    '.sc-top-left{flex:1;display:flex;flex-direction:column;align-items:flex-start;justify-content:center;padding:4px 10px;min-width:0;overflow:hidden;gap:1px;}',
+    '.sc-top-center{width:72px;flex-shrink:0;display:flex;flex-direction:column;align-items:center;justify-content:center;border-left:1px solid var(--border);border-right:1px solid var(--border);background:#111;padding:2px 4px;gap:1px;}',
+    '.sc-top-right{flex:1;display:flex;flex-direction:column;align-items:flex-end;justify-content:center;padding:4px 10px;min-width:0;overflow:hidden;gap:1px;}',
+    '.sc-top-player{font-size:12px;font-weight:700;color:var(--text-muted);font-family:Arial,sans-serif;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;line-height:1.25;}',
+    '.sc-top-player-active{color:var(--accent);}',
+    '.sc-top-legs{display:flex;align-items:center;gap:4px;}',
+    '.sc-top-leg-val{font-size:16px;font-weight:900;color:var(--accent);font-family:"Arial Black",Arial,sans-serif;line-height:1;}',
+    '.sc-top-leg-lbl{font-size:7px;color:var(--text-muted);letter-spacing:1px;text-transform:uppercase;font-family:Arial,sans-serif;}',
+    '.sc-top-game-info{font-size:8px;color:var(--text-muted);font-family:Arial,sans-serif;text-align:center;}',
+
+    // ── MAIN TABLE (capped height, scrollable) ────────
+    '.sc-table-wrap{flex:1;min-height:0;overflow-y:auto;background:#1a1a1a;}',
+    '.sc-table-wrap::-webkit-scrollbar{width:4px;}.sc-table-wrap::-webkit-scrollbar-track{background:#111;}.sc-table-wrap::-webkit-scrollbar-thumb{background:#444;border-radius:2px;}',
+    '.sc-tbl-head{display:grid;grid-template-columns:1fr 1.4fr 36px 1fr 1.4fr;background:#1e1e1e;border-bottom:2px solid #333;position:sticky;top:0;z-index:2;}',
+    '.sc-tbl-head>div{padding:3px 6px;font-size:9px;font-weight:700;color:#888;letter-spacing:1px;text-transform:uppercase;font-family:Arial,sans-serif;display:flex;align-items:center;}',
+    '.sc-tbl-row{display:grid;grid-template-columns:1fr 1.4fr 36px 1fr 1.4fr;border-bottom:1px solid #333;min-height:40px;}',
+    '.sc-tbl-row:nth-child(odd){background:#1a1a1a;}',
+    '.sc-tbl-row:nth-child(even){background:#222;}',
+    '.sc-tbl-row:not(.sc-tbl-start):not(.sc-tbl-pending){cursor:pointer;}',
+    '.sc-tbl-row:not(.sc-tbl-start):not(.sc-tbl-pending):hover{background:#2a2a2a;}',
+    '.sc-tbl-row>div{padding:3px 6px;font-size:13px;font-family:Arial,sans-serif;color:#ccc;display:flex;align-items:center;}',
+    '.sc-tbl-c1{justify-content:flex-end;font-size:13px;font-weight:600;color:#999;}',
+    '.sc-tbl-c2{justify-content:flex-end;font-size:22px;font-weight:900;color:#fff;font-family:"Arial Black",Arial,sans-serif;}',
+    '.sc-tbl-c3{justify-content:center;background:#161616;color:#555;font-size:10px;border-left:1px solid #333;border-right:1px solid #333;}',
+    '.sc-tbl-c4{justify-content:flex-start;font-size:13px;font-weight:600;color:#999;}',
+    '.sc-tbl-c5{justify-content:flex-start;font-size:22px;font-weight:900;color:#fff;font-family:"Arial Black",Arial,sans-serif;}',
+    '.sc-tbl-start{background:#161616!important;cursor:default!important;}',
+    '.sc-tbl-start>div{color:#555!important;font-size:11px!important;font-weight:400!important;font-style:italic;}',
+    '.sc-tbl-pending{cursor:default!important;}',
+    '.sc-tbl-pending-cell{background:var(--accent)!important;color:#fff!important;font-weight:700!important;}',
+    '.sc-tbl-bust{color:#ff6b6b!important;font-size:10px!important;font-weight:700!important;}',
+    // Edit row inside table
+    '.sc-history-edit-row{background:#222;border-bottom:1px solid #333;display:flex;align-items:center;gap:6px;padding:5px 10px;}',
+    '.sc-history-edit-row input{flex:1;background:#333;color:#fff;border:1px solid var(--accent);border-radius:6px;padding:4px 8px;font-size:13px;}',
+    '.sc-history-edit-row button{padding:4px 10px;border-radius:6px;border:none;cursor:pointer;font-size:12px;font-weight:700;}',
+    '.sc-edit-save{background:var(--accent);color:#fff;}',
+    '.sc-edit-cancel{background:#555;color:#fff;}',
+
+    // ── BOTTOM SCORE BAR (dominant element — flex:1) ──
+    '.sc-score-bar{display:flex;flex-shrink:0;height:120px;border-top:2px solid var(--border);}',
+    '.sc-score-box{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:8px;min-width:0;background:#111;transition:background 0.2s,border-bottom 0.2s;gap:4px;}',
+    '.sc-score-box.active-turn{background:rgba(232,82,10,0.08);border-bottom:3px solid var(--accent);}',
+    '.sc-box-name{font-size:9px;letter-spacing:1px;text-transform:uppercase;font-family:Arial,sans-serif;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;color:var(--text-muted);}',
+    '.sc-box-rem{font-size:min(5rem,22vw);font-weight:900;line-height:1;font-family:"Arial Black",Arial,sans-serif;letter-spacing:-2px;text-align:center;color:#fff;}',
+    '.sc-score-box.active-turn .sc-box-rem{color:var(--accent);}',
+    '.sc-score-divider{width:1px;background:var(--border);flex-shrink:0;align-self:stretch;}',
+
+    // ── NUMPAD AREA ───────────────────────────────────
+    '.sc-numpad-area{background:#0a0a0a;border-top:1px solid var(--border);flex-shrink:0;display:flex;flex-direction:column;gap:3px;padding:4px;}',
+    '.sc-input-row{display:flex;align-items:center;gap:10px;padding:2px 6px;}',
+    '.sc-input-label{font-size:11px;color:var(--text-muted);flex:1;font-family:Arial,sans-serif;}',
+    '.sc-input-val{font-size:26px;font-weight:800;color:#fff;min-width:60px;text-align:center;letter-spacing:2px;transition:color 0.15s;}',
+    '.sc-input-val.bust-flash{color:var(--danger)!important;}',
+    '.sc-input-val.leg-flash{color:var(--success)!important;}',
+    '.sc-action-row{display:grid;grid-template-columns:1fr 1fr;gap:3px;}',
+    '.sc-action-row .numpad-btn{min-height:36px;border-radius:7px;border:1px solid var(--border);background:#1a1a1a;color:#fff;font-size:13px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;-webkit-tap-highlight-color:transparent;}',
+    '.sc-action-row .numpad-btn:active{background:#2a2a2a;}',
+    '.sc-action-row .numpad-bust{background:#1a0a0a!important;border-color:var(--danger)!important;color:var(--danger)!important;}',
+    '.sc-action-row .numpad-undo{background:#1a1a2a!important;border-color:#555!important;color:#aaa!important;}',
+    '#sc-numpad{display:grid;grid-template-columns:repeat(3,1fr);gap:3px;}',
+    '#sc-numpad .numpad-btn{min-height:44px;border-radius:7px;border:1px solid var(--border);background:#1a1a1a;color:#fff;font-size:22px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;-webkit-tap-highlight-color:transparent;}',
+    '#sc-numpad .numpad-btn:active{background:#2a2a2a;}',
+    '#sc-numpad .numpad-confirm{background:var(--accent);border-color:var(--accent);font-size:20px;}',
+    '#sc-numpad .numpad-del{background:#2a1a1a;border-color:var(--danger);color:var(--danger);}',
+  ].join('');
+  document.head.appendChild(s);
+}());
+
+// ── Game state ────────────────────────────────────────
+const gameState = {
+  players: [],
+  sideScores: { home: 501, away: 501 },
+  currentPlayerIndex: 0,
+  currentLeg: 1,
+  legsWon: { home: 0, away: 0 },
+  startingScore: 501,
+  whoThrowsFirst: 'away',
+  format: null,
+  currentInput: '',
+  visitSeq: 0,
+  bustActive: false,
+  flashMsg: null,
+  flashTimer: null,
+};
+
+// ── Build interleaved player order ────────────────────
+function buildPlayerOrder(game) {
+  const fmt = game.format;
+  const phdPlayers = game.phd.map(n => ({ name: n, side: 'home' }));
+  const oppPlayers = game.opp.map(n => ({ name: n, side: 'away' }));
+  const firstSide  = fmt.throw;
+  const firstArr   = firstSide === 'away' ? oppPlayers : phdPlayers;
+  const secondArr  = firstSide === 'away' ? phdPlayers : oppPlayers;
+  const order = [];
+  const len = Math.max(firstArr.length, secondArr.length);
+  for (let i = 0; i < len; i++) {
+    if (firstArr[i])  order.push(firstArr[i]);
+    if (secondArr[i]) order.push(secondArr[i]);
+  }
+  return order;
+}
+
+// ── Initialise scoring screen from matchState ─────────
+function initScoringScreen() {
+  const game = matchState.games[matchState.currentGame - 1];
+  if (!game) return;
+  const fmt = game.format;
+
+  if (gameState.flashTimer) { clearTimeout(gameState.flashTimer); gameState.flashTimer = null; }
+
+  gameState.format         = fmt;
+  gameState.startingScore  = fmt.score;
+  gameState.whoThrowsFirst = fmt.throw;
+  gameState.sideScores     = { home: fmt.score, away: fmt.score };
+  gameState.legsWon        = { home: 0, away: 0 };
+  gameState.currentLeg     = 1;
+  gameState.visitSeq       = 0;
+  gameState.currentInput   = '';
+  gameState.bustActive     = false;
+  gameState.flashMsg       = null;
+  gameState.players        = buildPlayerOrder(game).map(p => ({ name: p.name, side: p.side, visits: [] }));
+
+  const firstIdx = gameState.players.findIndex(p => p.side === fmt.throw);
+  gameState.currentPlayerIndex = firstIdx >= 0 ? firstIdx : 0;
+
+  renderScoringScreen();
+}
+
+// ── Wrap Phase-3 startGame to call scoring init ───────
+(function(){
+  const _orig = window.startGame;
+  window.startGame = function(fmt) {
+    _orig(fmt);
+    initScoringScreen();
+  };
+}());
+
+// ── Rebuild the full scoring screen HTML ──────────────
+function renderScoringScreen() {
+  const scr = document.getElementById('screen-scoring');
+  if (!scr) return;
+  const fmt      = gameState.format;
+  const homeTeam = matchState.homeTeam || 'PHD';
+  const awayTeam = matchState.awayTeam || 'Opponents';
+
+  // Score bar labels show team name (player names are in the topbar)
+
+  scr.innerHTML = `
+    <!-- Top bar: 3 sections (home player | legs | away player) -->
+    <div class="sc-topbar">
+      <div class="sc-top-left" id="sc-top-left"></div>
+      <div class="sc-top-center">
+        <div class="sc-top-legs">
+          <span class="sc-top-leg-val" id="sc-legs-home">0</span>
+          <span class="sc-top-leg-lbl">LEGS</span>
+          <span class="sc-top-leg-val" id="sc-legs-away">0</span>
+        </div>
+        <div class="sc-top-game-info">G${matchState.currentGame}/9 &bull; ${escHtml(fmt.label)}</div>
+      </div>
+      <div class="sc-top-right" id="sc-top-right"></div>
+    </div>
+
+    <!-- Scrollable 5-column visit table -->
+    <div class="sc-table-wrap" id="sc-history"></div>
+
+    <!-- Bottom score bar: dark background, active gets orange tint + accent border -->
+    <div class="sc-score-bar" id="sc-score-bar">
+      <div class="sc-score-box" id="sc-panel-home">
+        <div class="sc-box-name" id="sc-names-home">${escHtml(homeTeam)}</div>
+        <div class="sc-box-rem" id="sc-rem-home">${fmt.score}</div>
+      </div>
+      <div class="sc-score-divider"></div>
+      <div class="sc-score-box" id="sc-panel-away">
+        <div class="sc-box-name" id="sc-names-away">${escHtml(awayTeam)}</div>
+        <div class="sc-box-rem" id="sc-rem-away">${fmt.score}</div>
+      </div>
+    </div>
+
+    <!-- Input display + action buttons + numpad -->
+    <div class="sc-numpad-area">
+      <div class="sc-input-row">
+        <div class="sc-input-label" id="sc-input-label">Enter score</div>
+        <div class="sc-input-val" id="sc-input-val">&mdash;</div>
+      </div>
+      <div class="sc-action-row">
+        <button class="numpad-btn numpad-bust" data-sc-val="bust">BUST</button>
+        <button class="numpad-btn numpad-undo" data-sc-val="undo">UNDO</button>
+      </div>
+      <div id="sc-numpad">
+        ${[1,2,3,4,5,6,7,8,9].map(n =>
+          `<button class="numpad-btn" data-sc-val="${n}">${n}</button>`).join('')}
+        <button class="numpad-btn numpad-del"     data-sc-val="del">&#9003;</button>
+        <button class="numpad-btn"                data-sc-val="0">0</button>
+        <button class="numpad-btn numpad-confirm" data-sc-val="confirm">&#10003;</button>
+      </div>
+    </div>
+
+    <!-- Dummy: keep legacy IDs alive for compat (hidden) -->
+    <div style="display:none;" id="sc-recent-home"></div>
+    <div style="display:none;" id="sc-recent-away"></div>
+    <div style="display:none;" id="sc-mid-info"></div>
+    <div style="display:none;" id="sc-match-pts"></div>
+
+    <!-- placeholder to satisfy old selector (replaced below in sc-score-area -->
+    <div style="display:none;"><div id="sc-topbar-names"></div>
+    </div>`;
+
+  bindNumpad();
+  // Wire action-row buttons (BUST / UNDO live outside #sc-numpad)
+  scr.querySelectorAll('.sc-action-row [data-sc-val]').forEach(btn => {
+    btn.addEventListener('click', () => handleNumpadInput(btn.dataset.scVal));
+  });
+  renderScoringUI();
+}
+
+// ── Update all display elements ───────────────────────
+function renderScoringUI() {
+  const gs = gameState;
+  const cp = gs.players[gs.currentPlayerIndex];
+  if (!cp) return;
+
+  const homeActive = cp.side === 'home';
+  const awayActive = cp.side === 'away';
+
+  // Remaining scores + legs
+  const setTxt = (id, v) => { const e = document.getElementById(id); if (e) e.textContent = v; };
+  setTxt('sc-rem-home', gs.sideScores.home);
+  setTxt('sc-rem-away', gs.sideScores.away);
+  setTxt('sc-legs-home', gs.legsWon.home);
+  setTxt('sc-legs-away', gs.legsWon.away);
+
+  // Top bar: home players stacked left, away players stacked right
+  // Currently throwing player is orange; all others are muted
+  const topLeftEl  = document.getElementById('sc-top-left');
+  const topRightEl = document.getElementById('sc-top-right');
+  if (topLeftEl) {
+    topLeftEl.className = 'sc-top-left';
+    topLeftEl.innerHTML = gs.players
+      .filter(p => p.side === 'home')
+      .map(p => `<span class="sc-top-player${p === cp ? ' sc-top-player-active' : ''}">${escHtml(p.name)}</span>`)
+      .join('');
+  }
+  if (topRightEl) {
+    topRightEl.className = 'sc-top-right';
+    topRightEl.innerHTML = gs.players
+      .filter(p => p.side === 'away')
+      .map(p => `<span class="sc-top-player${p === cp ? ' sc-top-player-active' : ''}">${escHtml(p.name)}</span>`)
+      .join('');
+  }
+
+  // Score box team name labels (player names are in the topbar)
+  const homeNameEl = document.getElementById('sc-names-home');
+  if (homeNameEl) homeNameEl.textContent = matchState.homeTeam || 'PHD';
+  const awayNameEl = document.getElementById('sc-names-away');
+  if (awayNameEl) awayNameEl.textContent = matchState.awayTeam || 'Opponents';
+
+  // Training mode: update all N team panels
+  if (gs.mode === 'training') {
+    (gs.teams || []).forEach((team, i) => {
+      const side    = 't' + i;
+      const panelEl = document.getElementById(`sc-panel-t${i}`);
+      if (!panelEl) return;
+      panelEl.classList.toggle('active-turn', cp.side === side);
+      const remEl   = document.getElementById(`sc-rem-t${i}`);
+      if (remEl) remEl.textContent = gs.sideScores[side];
+      const namesEl = document.getElementById(`sc-names-t${i}`);
+      if (namesEl) {
+        namesEl.innerHTML = gs.players
+          .filter(p => p.side === side)
+          .map(p => `<span${p === cp ? ' class="sc-active-player"' : ''}>${escHtml(p.name)}</span>`)
+          .join('<br>');
+      }
+    });
+    // Refresh legs-won display in topbar (multi-leg training only)
+    if (gs.format && gs.format.legs > 1) {
+      const ldisp = document.getElementById('tr-legs-display');
+      if (ldisp) ldisp.textContent = (gs.teams || []).map(t => gs.legsWon[t.side] || 0).join('–');
+    }
+  }
+
+  // Score box active state (match mode)
+  const homeBox = document.getElementById('sc-panel-home');
+  const awayBox = document.getElementById('sc-panel-away');
+  if (homeBox) homeBox.classList.toggle('active-turn', homeActive);
+  if (awayBox) awayBox.classList.toggle('active-turn', awayActive);
+
+  // Input display
+  const ivEl = document.getElementById('sc-input-val');
+  const ilEl = document.getElementById('sc-input-label');
+  if (ivEl) {
+    if (gs.flashMsg) {
+      ivEl.textContent = gs.flashMsg.text;
+      ivEl.className   = 'sc-input-val ' + (gs.flashMsg.cls || '');
+    } else {
+      ivEl.textContent = gs.currentInput || '—';
+      ivEl.className   = 'sc-input-val';
+    }
+  }
+  if (ilEl) ilEl.textContent = `${cp.name} — Leg ${gs.currentLeg}`;
+
+  renderVisitHistory();
+}
+
+// ── Last 3 visits for a side inside the score panel ───
+function renderRecentVisits(side) {
+  const gs  = gameState;
+  const el  = document.getElementById(`sc-recent-${side}`);
+  if (!el) return;
+  const legVisits = [];
+  gs.players.filter(p => p.side === side).forEach(p =>
+    p.visits.filter(v => v.leg === gs.currentLeg).forEach(v => legVisits.push(v))
+  );
+  legVisits.sort((a, b) => b.seq - a.seq);
+  el.innerHTML = legVisits.slice(0, 3).map(v =>
+    v.wasBust
+      ? `<span class="sc-recent-item" style="color:var(--danger)">BUST</span>`
+      : `<span class="sc-recent-item">${v.scored}</span>`
+  ).join('');
+}
+
+// ── Visit history: 5-column table (2-sided) or simple list (3+ team training) ─
+function renderVisitHistory() {
+  const gs = gameState;
+  const el = document.getElementById('sc-history');
+  if (!el) return;
+
+  // ── N-column table for 3-or-4-team training ─────────────────────
+  if (gs.mode === 'training' && gs.numTeams > 2) {
+    el.style.background = '';
+    const cp         = gs.players[gs.currentPlayerIndex];
+    const N          = gs.numTeams;
+    const cols       = `repeat(${N},1fr)`;
+    const startScore = gs.startingScore;
+
+    // For each team: current-leg visits sorted chronologically
+    const teamVisits = gs.teams.map(team => {
+      const vis = [];
+      gs.players.forEach((p, pi) => {
+        if (p.side !== team.side) return;
+        p.visits
+          .filter(v => v.leg === gs.currentLeg)
+          .forEach((v, vi) => vis.push({ p, pi, v, vi }));
+      });
+      vis.sort((a, b) => a.v.seq - b.v.seq);
+      return vis;
+    });
+
+    const rounds = teamVisits.reduce((m, tv) => Math.max(m, tv.length), 0);
+
+    // Header row + starting-score row
+    let html = `
+      <div class="sc-mtr-head" style="display:grid;grid-template-columns:${cols};">
+        ${gs.teams.map(t => `<div>${escHtml(t.name)}</div>`).join('')}
+      </div>
+      <div class="sc-tbl-row sc-tbl-start" style="display:grid;grid-template-columns:${cols};">
+        ${gs.teams.map(() => `<div class="sc-mtr-cell"><span>${startScore}</span></div>`).join('')}
+      </div>`;
+
+    // One row per round
+    for (let i = 0; i < rounds; i++) {
+      const cells = gs.teams.map((team, ti) => {
+        const entry = teamVisits[ti][i];
+        if (!entry) return `<div class="sc-mtr-cell"></div>`;
+        const { pi, vi, v } = entry;
+        if (v.wasBust) {
+          return `<div class="sc-mtr-cell" data-pi="${pi}" data-vi="${vi}">` +
+                 `<span class="sc-mtr-bust">BUST</span>` +
+                 `<span class="sc-mtr-rem sc-mtr-dim">${v.remaining}</span></div>`;
+        }
+        return `<div class="sc-mtr-cell" data-pi="${pi}" data-vi="${vi}">` +
+               `<span class="sc-mtr-scored">${v.scored}</span>` +
+               `<span class="sc-mtr-rem">${v.remaining}</span></div>`;
+      }).join('');
+      html += `\n      <div class="sc-tbl-row" style="display:grid;grid-template-columns:${cols};">${cells}</div>`;
+    }
+
+    // Pending input row (active team's column only)
+    if (cp && gs.currentInput) {
+      const cells = gs.teams.map(team => {
+        const active = cp.side === team.side;
+        return active
+          ? `<div class="sc-mtr-cell sc-mtr-pending"><span class="sc-mtr-input">${escHtml(gs.currentInput)}</span></div>`
+          : `<div class="sc-mtr-cell"></div>`;
+      }).join('');
+      html += `\n      <div class="sc-tbl-row sc-tbl-pending" style="display:grid;grid-template-columns:${cols};">${cells}</div>`;
+    }
+
+    el.innerHTML = html;
+
+    // Click a cell → inline edit (replaces the whole row, same as 5-col table)
+    el.querySelectorAll('.sc-tbl-row:not(.sc-tbl-start):not(.sc-tbl-pending)').forEach(rowEl => {
+      rowEl.querySelectorAll('.sc-mtr-cell[data-pi]').forEach(cell => {
+        cell.addEventListener('click', () => {
+          activateVisitEdit(rowEl, +cell.dataset.pi, +cell.dataset.vi);
+        });
+      });
+    });
+
+    el.scrollTop = el.scrollHeight;
+    return;
+  }
+
+  // ── 5-column table for match mode and 2-team training ──────────────
+  // Determine the two sides: match uses home/away, 2-team training uses t0/t1
+  const leftSide  = gs.mode === 'training' ? 't0' : 'home';
+  const rightSide = gs.mode === 'training' ? 't1' : 'away';
+
+  el.style.background = '';
+  const cp  = gs.players[gs.currentPlayerIndex];
+  const fmt = gs.format;
+  const startScore = fmt ? fmt.score : gs.startingScore;
+
+  // Separate left and right visits, sorted chronologically
+  const leftVisits  = [];
+  const rightVisits = [];
+  gs.players.forEach((p, pi) => {
+    p.visits.filter(v => v.leg === gs.currentLeg).forEach((v, vi) => {
+      if      (p.side === leftSide)  leftVisits.push({ p, pi, v, vi });
+      else if (p.side === rightSide) rightVisits.push({ p, pi, v, vi });
+    });
+  });
+  leftVisits.sort((a, b)  => a.v.seq - b.v.seq);
+  rightVisits.sort((a, b) => a.v.seq - b.v.seq);
+
+  const rounds = Math.max(leftVisits.length, rightVisits.length);
+
+  // Header + starting row
+  let html = `
+    <div class="sc-tbl-head">
+      <div class="sc-tbl-c1">Scored</div>
+      <div class="sc-tbl-c2">To Go</div>
+      <div class="sc-tbl-c3">DARTS</div>
+      <div class="sc-tbl-c4">Scored</div>
+      <div class="sc-tbl-c5">To Go</div>
+    </div>
+    <div class="sc-tbl-row sc-tbl-start">
+      <div class="sc-tbl-c1"></div>
+      <div class="sc-tbl-c2">${startScore}</div>
+      <div class="sc-tbl-c3">&mdash;</div>
+      <div class="sc-tbl-c4"></div>
+      <div class="sc-tbl-c5">${startScore}</div>
+    </div>`;
+
+  // One row per round; centre column shows cumulative dart count (3, 6, 9…)
+  for (let i = 0; i < rounds; i++) {
+    const lv = leftVisits[i];
+    const rv = rightVisits[i];
+    const c1 = lv ? (lv.v.wasBust ? 'BUST' : String(lv.v.scored)) : '';
+    const c2 = lv ? String(lv.v.remaining) : '';
+    const c4 = rv ? (rv.v.wasBust ? 'BUST' : String(rv.v.scored)) : '';
+    const c5 = rv ? String(rv.v.remaining) : '';
+    const lPi = lv ? lv.pi : -1, lVi = lv ? lv.vi : -1;
+    const rPi = rv ? rv.pi : -1, rVi = rv ? rv.vi : -1;
+    html += `
+      <div class="sc-tbl-row" data-pi="${lPi}" data-vi="${lVi}" data-api="${rPi}" data-avi="${rVi}">
+        <div class="sc-tbl-c1${lv && lv.v.wasBust ? ' sc-tbl-bust' : ''}">${escHtml(c1)}</div>
+        <div class="sc-tbl-c2">${escHtml(c2)}</div>
+        <div class="sc-tbl-c3">${(i + 1) * 3}</div>
+        <div class="sc-tbl-c4${rv && rv.v.wasBust ? ' sc-tbl-bust' : ''}">${escHtml(c4)}</div>
+        <div class="sc-tbl-c5">${escHtml(c5)}</div>
+      </div>`;
+  }
+
+  // Pending input row (only real typed input — never flash messages like BUST!/LEG)
+  if (cp) {
+    const inputText = gs.currentInput;
+    if (inputText) {
+      const isLeft = cp.side === leftSide;
+      html += `
+        <div class="sc-tbl-row sc-tbl-pending">
+          <div class="sc-tbl-c1${isLeft  ? ' sc-tbl-pending-cell' : ''}">${isLeft  ? escHtml(inputText) : ''}</div>
+          <div class="sc-tbl-c2${isLeft  ? ' sc-tbl-pending-cell' : ''}"></div>
+          <div class="sc-tbl-c3">&#9658;</div>
+          <div class="sc-tbl-c4${!isLeft ? ' sc-tbl-pending-cell' : ''}">${!isLeft ? escHtml(inputText) : ''}</div>
+          <div class="sc-tbl-c5${!isLeft ? ' sc-tbl-pending-cell' : ''}"></div>
+        </div>`;
+    }
+  }
+
+  el.innerHTML = html;
+
+  // Click left cells → edit left visit; click right cells → edit right visit
+  el.querySelectorAll('.sc-tbl-row:not(.sc-tbl-start):not(.sc-tbl-pending)').forEach(row => {
+    const lPi = +row.dataset.pi,  lVi = +row.dataset.vi;
+    const rPi = +row.dataset.api, rVi = +row.dataset.avi;
+    row.querySelectorAll('.sc-tbl-c1,.sc-tbl-c2').forEach(cell => {
+      cell.addEventListener('click', e => {
+        if (lPi >= 0 && lVi >= 0) { e.stopPropagation(); activateVisitEdit(row, lPi, lVi); }
+      });
+    });
+    row.querySelectorAll('.sc-tbl-c4,.sc-tbl-c5').forEach(cell => {
+      cell.addEventListener('click', e => {
+        if (rPi >= 0 && rVi >= 0) { e.stopPropagation(); activateVisitEdit(row, rPi, rVi); }
+      });
+    });
+  });
+
+  el.scrollTop = el.scrollHeight;
+}
+
+// ── Bind numpad (fresh element each renderScoringScreen) ─
+function bindNumpad() {
+  const grid = document.getElementById('sc-numpad');
+  if (!grid) return;
+  grid.addEventListener('click', e => {
+    const btn = e.target.closest('[data-sc-val]');
+    if (btn) handleNumpadInput(btn.dataset.scVal);
+  });
+}
+
+// ── Numpad input handler ──────────────────────────────
+function handleNumpadInput(val) {
+  const gs = gameState;
+  if (gs.flashMsg) return;
+
+  if (val === 'del') {
+    gs.currentInput = gs.currentInput.slice(0, -1);
+    renderScoringUI();
+    return;
+  }
+  if (val === 'bust') {
+    const cp = gs.players[gs.currentPlayerIndex];
+    if (cp) { gs.currentInput = ''; triggerBust(cp); }
+    return;
+  }
+  if (val === 'undo') {
+    undoLastVisit();
+    return;
+  }
+  if (val === 'confirm') {
+    const raw = gs.currentInput;
+    gs.currentInput = '';
+    const score = parseInt(raw, 10);
+    if (isNaN(score) || score < 0) { renderScoringUI(); return; }
+    processVisit(score);
+    return;
+  }
+  // Digit
+  const candidate = gs.currentInput + val;
+  if (parseInt(candidate, 10) > 180) return;
+  gs.currentInput = candidate;
+  renderScoringUI();
+}
+
+// ── Process a confirmed score ─────────────────────────
+function processVisit(score) {
+  const gs  = gameState;
+  const cp  = gs.players[gs.currentPlayerIndex];
+  if (!cp) return;
+
+  const rem    = gs.sideScores[cp.side];
+  const newRem = rem - score;
+
+  // Bust: negative or stranded on 1
+  if (newRem < 0 || newRem === 1) { triggerBust(cp); return; }
+
+  cp.visits.push({ scored: score, wasBust: false, leg: gs.currentLeg, seq: ++gs.visitSeq, remaining: newRem });
+  gs.sideScores[cp.side] = newRem;
+
+  if (newRem === 0) {
+    handleLegWin(cp.side);
+  } else {
+    advanceTurn();
+    renderScoringUI();
+  }
+}
+
+// ── Bust ─────────────────────────────────────────────
+function triggerBust(player) {
+  const gs  = gameState;
+  const rem = gs.sideScores[player.side];
+  player.visits.push({ scored: 0, wasBust: true, leg: gs.currentLeg, seq: ++gs.visitSeq, remaining: rem });
+
+  gs.flashMsg     = { text: 'BUST!', cls: 'bust-flash' };
+  gs.currentInput = '';
+  renderScoringUI();
+
+  if (gs.flashTimer) clearTimeout(gs.flashTimer);
+  gs.flashTimer = setTimeout(() => {
+    gs.flashMsg   = null;
+    gs.flashTimer = null;
+    advanceTurn();
+    renderScoringUI();
+  }, 1500);
+}
+
+// ── Advance turn ──────────────────────────────────────
+function advanceTurn() {
+  const gs = gameState;
+  gs.currentPlayerIndex = (gs.currentPlayerIndex + 1) % gs.players.length;
+}
+
+// ── Leg win logic ─────────────────────────────────────
+function handleLegWin(winningSide) {
+  const gs  = gameState;
+  const fmt = gs.format;
+
+  if (fmt.legs === 1) {
+    recordGameWinner(winningSide);
+    return;
+  }
+
+  gs.legsWon[winningSide]++;
+  if (gs.legsWon[winningSide] >= Math.ceil(fmt.legs / 2)) {
+    recordGameWinner(winningSide);
+  } else {
+    startNewLeg();
+  }
+}
+
+// ── New leg ───────────────────────────────────────────
+function startNewLeg() {
+  const gs     = gameState;
+  gs.currentLeg++;
+  gs.sideScores = { home: gs.startingScore, away: gs.startingScore };
+
+  // Alternate first throw each leg
+  const legFirst = (gs.currentLeg % 2 === 1)
+    ? gs.whoThrowsFirst
+    : (gs.whoThrowsFirst === 'home' ? 'away' : 'home');
+  const idx = gs.players.findIndex(p => p.side === legFirst);
+  gs.currentPlayerIndex = idx >= 0 ? idx : 0;
+
+  gs.flashMsg = { text: `LEG ${gs.currentLeg}`, cls: 'leg-flash' };
+  renderScoringUI();
+
+  if (gs.flashTimer) clearTimeout(gs.flashTimer);
+  gs.flashTimer = setTimeout(() => {
+    gs.flashMsg   = null;
+    gs.flashTimer = null;
+    renderScoringUI();
+  }, 1800);
+}
+
+// ── Record game winner, update points, go to stats ───
+function recordGameWinner(side) {
+  const game = matchState.games[matchState.currentGame - 1];
+  if (!game) return;
+  if (game.winner) return;          // guard: already recorded — prevents double-increment
+  game.winner = side;
+  if (side === 'home') matchState.points.home++;
+  else matchState.points.away++;
+  renderStatsScreen(side);
+  navigateTo('screen-stats');
+}
+
+// ── Undo last visit ───────────────────────────────────
+function undoLastVisit() {
+  const gs = gameState;
+  let maxSeq = -1, tPi = -1, tVi = -1;
+
+  gs.players.forEach((p, pi) =>
+    p.visits.forEach((v, vi) => {
+      if (v.leg === gs.currentLeg && v.seq > maxSeq) {
+        maxSeq = v.seq; tPi = pi; tVi = vi;
+      }
+    })
+  );
+
+  if (tPi < 0) return;
+  gs.players[tPi].visits.splice(tVi, 1);
+  if (gs.visitSeq > 0) gs.visitSeq--;
+  Object.keys(gs.sideScores).forEach(side => recalcSideScore(side));
+  gs.currentPlayerIndex = tPi;
+
+  // Restore training turn-tracking state so the next advanceTurn
+  // correctly continues from the player who just had their visit undone.
+  if (gs.mode === 'training' && gs.trTeamPlayers) {
+    const side = gs.players[tPi].side;            // 't0', 't1', …
+    const ti   = parseInt(side.slice(1), 10);
+    gs.trTeamTurn = ti;
+    const posInTeam = gs.trTeamPlayers[ti].indexOf(tPi);
+    if (posInTeam >= 0) gs.trTeamPlayerOffset[ti] = posInTeam;
+  }
+
+  gs.currentInput = '';
+  renderScoringUI();
+}
+
+// ── Recalculate remaining scores from visit history ───
+function recalcSideScore(side) {
+  const gs      = gameState;
+  const players = gs.players.filter(p => p.side === side);
+
+  // Collect all current-leg visits, sort chronologically
+  const all = [];
+  players.forEach(p =>
+    p.visits.filter(v => v.leg === gs.currentLeg).forEach(v => all.push(v))
+  );
+  all.sort((a, b) => a.seq - b.seq);
+
+  let rem = gs.startingScore;
+  all.forEach(v => {
+    if (!v.wasBust) rem -= v.scored;
+    v.remaining = rem; // Bust visits also reflect current remaining at time of throw
+  });
+  gs.sideScores[side] = rem;
+}
+
+// ── Inline visit editing ──────────────────────────────
+function activateVisitEdit(row, pi, vi) {
+  const gs    = gameState;
+  const visit = gs.players[pi] && gs.players[pi].visits[vi];
+  if (!visit) return;
+
+  const editHtml = `<div class="sc-history-edit-row" data-pi="${pi}" data-vi="${vi}">
+    <input type="number" min="0" max="180" value="${visit.wasBust ? '' : visit.scored}" placeholder="0-180 or blank=BUST">
+    <button class="sc-edit-save">Save</button>
+    <button class="sc-edit-cancel">Cancel</button>
+  </div>`;
+
+  row.outerHTML = editHtml;
+
+  const histEl  = document.getElementById('sc-history');
+  if (!histEl) return;
+  const editRow = histEl.querySelector(`.sc-history-edit-row[data-pi="${pi}"][data-vi="${vi}"]`);
+  if (!editRow) return;
+
+  editRow.querySelector('.sc-edit-save').addEventListener('click', () => {
+    const inp = editRow.querySelector('input');
+    const raw = inp.value.trim();
+    if (raw === '') {
+      visit.scored = 0; visit.wasBust = true;
+    } else {
+      const n = parseInt(raw, 10);
+      if (isNaN(n) || n < 0 || n > 180) { inp.style.borderColor = 'var(--danger)'; return; }
+      visit.scored = n; visit.wasBust = false;
+    }
+    Object.keys(gameState.sideScores).forEach(side => recalcSideScore(side));
+    renderScoringUI();
+  });
+
+  editRow.querySelector('.sc-edit-cancel').addEventListener('click', () => renderVisitHistory());
+}
+
+// ── Populate stats screen ─────────────────────────────
+function renderStatsScreen(winningSide) {
+  const gs       = gameState;
+  const homeTeam = matchState.homeTeam || 'PHD';
+  const awayTeam = matchState.awayTeam || 'Opponents';
+
+  function sideStats(side) {
+    const allVisits = [];
+    gs.players.filter(p => p.side === side).forEach(p => p.visits.forEach(v => allVisits.push(v)));
+    const scored = allVisits.filter(v => !v.wasBust);
+    const total  = scored.reduce((s, v) => s + v.scored, 0);
+    const visits = scored.length;
+    const avg    = visits > 0 ? (total / visits).toFixed(1) : '—';
+    const high   = visits > 0 ? Math.max(...scored.map(v => v.scored)) : 0;
+    const c100   = scored.filter(v => v.scored >= 100 && v.scored < 180).length;
+    const c180   = scored.filter(v => v.scored === 180).length;
+    const darts  = visits * 3;
+    return { avg, high, c100, c180, darts };
+  }
+
+  const hs = sideStats('home');
+  const as = sideStats('away');
+  const winnerName = winningSide === 'home' ? homeTeam : awayTeam;
+
+  // Winner banner
+  const wnEl = document.querySelector('.stats-winner-name');
+  const wsEl = document.querySelector('.stats-winner-sub');
+  if (wnEl) wnEl.textContent = winnerName + ' Win!';
+  if (wsEl) wsEl.textContent = `Match points: ${matchState.points.home}–${matchState.points.away}`;
+
+  // Legs / match-points cards
+  const cards = document.querySelectorAll('.flex-row .card');
+  if (cards[0]) cards[0].innerHTML = `<div style="font-size:11px;color:var(--text-muted)">LEGS</div><div style="font-size:24px;font-weight:800">${gs.legsWon.home}–${gs.legsWon.away}</div>`;
+  if (cards[1]) cards[1].innerHTML = `<div style="font-size:11px;color:var(--text-muted)">MATCH PTS</div><div style="font-size:24px;font-weight:800">${matchState.points.home}–${matchState.points.away}</div>`;
+
+  // Stats table
+  const tbl = document.querySelector('.stats-table');
+  if (tbl) {
+    tbl.innerHTML = `
+      <thead><tr><th>Stat</th><th>${escHtml(homeTeam)}</th><th>${escHtml(awayTeam)}</th></tr></thead>
+      <tbody>
+        <tr><td>3-dart Avg</td><td>${hs.avg}</td><td>${as.avg}</td></tr>
+        <tr><td>Highest Visit</td><td>${hs.high}</td><td>${as.high}</td></tr>
+        <tr><td>100+</td><td>${hs.c100}</td><td>${as.c100}</td></tr>
+        <tr><td>180s</td><td>${hs.c180}</td><td>${as.c180}</td></tr>
+        <tr><td>Darts Thrown</td><td>${hs.darts}</td><td>${as.darts}</td></tr>
+      </tbody>`;
+  }
+
+  // Hide checkout highlight (honour system — no dart-by-dart tracking)
+  const cho = document.querySelector('.checkout-highlight');
+  if (cho) cho.style.display = 'none';
+}
+
+// ── Stats screen button wiring (once) ────────────────
+(function bindStatsButtons() {
+  const nextBtn   = document.getElementById('btn-next-game');
+  const finishBtn = document.getElementById('btn-finish-match');
+
+  if (nextBtn) {
+    nextBtn.addEventListener('click', () => {
+      matchState.currentGame++;
+      if (matchState.currentGame > 9) {
+        navigateTo('screen-home');
+        return;
+      }
+      phdSelected = [];
+      renderGameSetup();
+      navigateTo('screen-game-setup');
+    });
+  }
+
+  if (finishBtn) {
+    finishBtn.addEventListener('click', () => navigateTo('screen-home'));
+  }
+}());
+
+/* ══════════════════════════════════════════════════════
+   PHASE 5 — TRAINING MODE + MATCH HISTORY + AUTO-SAVE
+══════════════════════════════════════════════════════ */
+
+// ── Storage keys ──────────────────────────────────────
+const MATCH_HISTORY_KEY    = 'phd_match_history';
+const TRAINING_HISTORY_KEY = 'phd_training_history';
+
+// ── CSS for Phase 5 components ────────────────────────
+(function(){
+  const s = document.createElement('style');
+  s.textContent = [
+    // Training screen layout
+    '#screen-training{padding:20px 16px;gap:16px;}',
+    '#screen-training-stats{padding:20px 16px;gap:16px;}',
+    // Roster grid (training)
+    '.tr-roster-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;}',
+    '.tr-roster-btn{background:var(--bg-raised);border:2px solid var(--border);border-radius:var(--radius);color:var(--text);font-family:Arial,sans-serif;font-weight:700;font-size:0.85rem;padding:10px 6px;cursor:pointer;text-align:center;min-height:48px;-webkit-tap-highlight-color:transparent;line-height:1.2;transition:background 0.12s,border-color 0.12s;}',
+    '.tr-roster-btn.tr-selected{background:var(--accent);border-color:var(--accent);color:#fff;}',
+    // Player list (training)
+    '.tr-player-list{display:flex;flex-direction:column;gap:6px;}',
+    '.tr-player-row{display:flex;align-items:center;gap:10px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);padding:10px 14px;font-size:0.9rem;}',
+    '.tr-num{color:var(--text-muted);font-size:0.75rem;min-width:18px;font-family:Arial,sans-serif;}',
+    '.tr-remove-btn{background:none;border:none;color:var(--danger);cursor:pointer;font-size:1.1rem;padding:4px 6px;line-height:1;margin-left:auto;}',
+    // Throw-first selector
+    '.tr-throw-grid{display:flex;flex-wrap:wrap;gap:8px;}',
+    '.tr-throw-btn{background:var(--bg-raised);border:2px solid var(--border);border-radius:var(--radius);color:var(--text);font-family:Arial,sans-serif;font-weight:700;font-size:0.85rem;padding:10px 16px;cursor:pointer;min-height:48px;-webkit-tap-highlight-color:transparent;transition:background 0.12s,border-color 0.12s;}',
+    '.tr-throw-btn.tr-selected{background:var(--accent);border-color:var(--accent);color:#fff;}',
+    // Leg format selector (Best of / First to — 2 columns)
+    '.tr-fmt-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;}',
+    // Score preset buttons
+    '.tr-score-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;}',
+    '.tr-score-btn{background:var(--bg-raised);border:2px solid var(--border);border-radius:var(--radius);color:var(--text);font-family:Arial,sans-serif;font-weight:700;font-size:1rem;padding:10px 6px;cursor:pointer;text-align:center;min-height:56px;-webkit-tap-highlight-color:transparent;line-height:1.2;transition:background 0.12s,border-color 0.12s;}',
+    '.tr-score-btn.tr-score-sel{background:var(--accent);border-color:var(--accent);color:#fff;}',
+    // History expand rows
+    '.hm-expand{display:none;padding:0 14px 12px;}',
+    '.hm-expand.open{display:block;}',
+    '.hm-game-row{display:flex;align-items:center;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border);gap:10px;}',
+    '.hm-game-row:last-child{border-bottom:none;}',
+    '.hm-game-label{font-size:0.75rem;color:var(--text-muted);font-family:Arial,sans-serif;min-width:70px;}',
+    '.hm-game-winner{font-size:0.85rem;color:var(--accent);font-weight:700;}',
+    '.hm-game-players{font-size:0.7rem;color:var(--text-muted);font-family:Arial,sans-serif;text-align:right;flex:1;}',
+    '.hm-del-btn{background:none;border:1px solid var(--danger);color:var(--danger);border-radius:6px;padding:3px 10px;font-size:0.75rem;cursor:pointer;font-family:Arial,sans-serif;white-space:nowrap;}',
+    // Multi-team training setup
+    '.tr-team-card{background:var(--bg-card);border:2px solid var(--border);border-radius:var(--radius-lg);padding:14px;display:flex;flex-direction:column;gap:10px;}',
+    '.tr-num-teams-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;}',
+    // Training score bar: N panels side by side
+    '.sc-train-bar{display:flex;flex-shrink:0;height:120px;width:100%;background:#0a0a0a;border-top:2px solid var(--border);overflow:hidden;}',
+    '.sc-train-panel{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:8px 4px;border-right:1px solid var(--border);min-width:0;overflow:hidden;transition:background 0.2s;}',
+    '.sc-train-panel:last-child{border-right:none;}',
+    '.sc-train-panel.active-turn{background:rgba(232,82,10,0.08);border-bottom:3px solid var(--accent);}',
+    '.sc-train-panel .score-team{font-size:0.6rem;color:var(--text-muted);letter-spacing:1px;text-transform:uppercase;font-family:Arial,sans-serif;margin-bottom:2px;text-align:center;word-break:break-word;max-width:100%;}',
+    '.sc-train-panel .score-remaining{font-size:min(5rem,22vw);font-weight:900;color:var(--text);line-height:1;text-align:center;}',
+    '.sc-train-panel.active-turn .score-remaining{color:var(--accent);}',
+    '.sc-train-panel .score-players{font-size:0.68rem;text-align:center;color:var(--text-dim);margin-top:3px;line-height:1.4;min-height:14px;max-width:100%;overflow:hidden;}',
+    '.sc-train-panel .sc-recent{font-size:10px;color:var(--text-muted);text-align:center;margin-top:2px;min-height:12px;}',
+    '.sc-train-bar.teams-3 .score-remaining,.sc-train-bar.teams-4 .score-remaining{font-size:min(2.4rem,14vw);}',
+    '.sc-train-bar.teams-4 .score-team{font-size:0.5rem;}',
+    // Multi-team training table: one column per team
+    '.sc-mtr-head{background:#1e1e1e;border-bottom:2px solid #333;position:sticky;top:0;z-index:2;}',
+    '.sc-mtr-head>div{padding:3px 6px;font-size:9px;font-weight:700;color:#888;letter-spacing:1px;text-transform:uppercase;font-family:Arial,sans-serif;display:flex;align-items:center;justify-content:center;border-right:1px solid #333;}',
+    '.sc-mtr-head>div:last-child{border-right:none;}',
+    '.sc-mtr-cell{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:40px;border-right:1px solid #333;}',
+    '.sc-mtr-cell:last-child{border-right:none;}',
+    '.sc-mtr-scored{font-size:10px;color:#999;font-family:Arial,sans-serif;}',
+    '.sc-mtr-rem{font-size:18px;font-weight:900;color:#fff;font-family:"Arial Black",Arial,sans-serif;line-height:1;}',
+    '.sc-mtr-dim{color:#666!important;}',
+    '.sc-mtr-bust{font-size:10px;font-weight:700;color:var(--danger);}',
+    '.sc-mtr-pending{background:rgba(232,82,10,0.12)!important;border-bottom:2px solid var(--accent)!important;}',
+    '.sc-mtr-input{font-size:18px;font-weight:900;color:var(--accent);font-family:"Arial Black",Arial,sans-serif;line-height:1;}',
+    // 3-4 team training: table-dominant layout — same proportions as 2-team (override old compact overrides)
+    '#screen-scoring.sc-multi-training .sc-table-wrap{flex:1!important;max-height:none!important;min-height:0!important;}',
+    '#screen-scoring.sc-multi-training .sc-train-bar{flex:none!important;flex-shrink:0!important;height:120px!important;}',
+  ].join('');
+  document.head.appendChild(s);
+}());
+
+// ── Training state ────────────────────────────────────
+const trainingState = {
+  startingScore: 501,
+  legs:          1,
+  legFormat:     'bestof',   // 'bestof' | 'firstto'
+  teams:         [],   // [{name, players:[]}]  committed on startTraining
+  firstTeamIdx:  0,
+};
+
+// Working vars for training setup form
+let trNumTeams    = 2;
+let trTeams       = [
+  { name: 'Team 1', players: [] },
+  { name: 'Team 2', players: [] },
+  { name: 'Team 3', players: [] },
+  { name: 'Team 4', players: [] },
+];
+let trFirstTeamIdx = null;   // index into trTeams (0-based)
+let trScore        = 501;
+let trLegFormat    = 'bestof'; // 'bestof' | 'firstto'
+let trLegs         = 1;
+
+// ── Training setup screen render ──────────────────────
+function renderTrainingSetup() {
+  const scr = document.getElementById('screen-training');
+  if (!scr) return;
+
+  scr.innerHTML = `
+    <div>
+      <div class="page-title">Training</div>
+      <div class="page-subtitle">Set up a practice game</div>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">Starting Score</label>
+      <div class="tr-score-grid" id="tr-score-grid">
+        <button class="tr-score-btn" data-score="121">121</button>
+        <button class="tr-score-btn" data-score="301">301</button>
+        <button class="tr-score-btn tr-score-sel" data-score="501">501</button>
+        <button class="tr-score-btn" data-score="custom">Custom</button>
+      </div>
+      <input class="form-input" id="tr-custom-score" type="number" min="101" max="9999"
+             inputmode="numeric" placeholder="Enter score (min 101)"
+             style="display:none;margin-top:8px;"/>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">Legs — Format</label>
+      <div class="tr-fmt-grid" id="tr-fmt-grid">
+        <button class="tr-score-btn tr-score-sel" data-fmt="bestof">Best of</button>
+        <button class="tr-score-btn" data-fmt="firstto">First to</button>
+      </div>
+      <div class="tr-score-grid" id="tr-legs-grid" style="margin-top:8px;">
+        <button class="tr-score-btn tr-score-sel" data-legs="1">1</button>
+        <button class="tr-score-btn" data-legs="3">3</button>
+        <button class="tr-score-btn" data-legs="5">5</button>
+        <button class="tr-score-btn" data-legs="7">7</button>
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">Number of Teams</label>
+      <div class="tr-num-teams-grid" id="tr-num-teams-grid">
+        <button class="tr-score-btn tr-score-sel" data-num-teams="2">2 Teams</button>
+        <button class="tr-score-btn" data-num-teams="3">3 Teams</button>
+        <button class="tr-score-btn" data-num-teams="4">4 Teams</button>
+      </div>
+    </div>
+
+    <div id="tr-teams-container"></div>
+
+    <div class="form-group" id="tr-throw-group" style="display:none;">
+      <label class="form-label">Who Throws First?</label>
+      <div class="tr-throw-grid" id="tr-throw-grid"></div>
+    </div>
+
+    <div class="mt-auto">
+      <button class="btn btn-primary" id="tr-start-btn">
+        &#127985;&nbsp; Start Training
+      </button>
+    </div>`;
+
+  // Reset working state
+  trNumTeams    = 2;
+  trTeams       = [
+    { name: 'Team 1', players: [] },
+    { name: 'Team 2', players: [] },
+    { name: 'Team 3', players: [] },
+    { name: 'Team 4', players: [] },
+  ];
+  trFirstTeamIdx = null;
+  trScore        = 501;
+  trLegFormat    = 'bestof';
+  trLegs         = 1;
+
+  renderTeamsContainer();
+  attachTrainingSetupListeners();
+}
+
+function attachTrainingSetupListeners() {
+  // Score preset buttons
+  const scoreGrid   = document.getElementById('tr-score-grid');
+  const customInput = document.getElementById('tr-custom-score');
+  if (scoreGrid) {
+    scoreGrid.addEventListener('click', e => {
+      const btn = e.target.closest('.tr-score-btn');
+      if (!btn) return;
+      scoreGrid.querySelectorAll('.tr-score-btn').forEach(b => b.classList.remove('tr-score-sel'));
+      btn.classList.add('tr-score-sel');
+      if (btn.dataset.score === 'custom') {
+        customInput.style.display = '';
+        customInput.focus();
+        trScore = parseInt(customInput.value, 10) || 0;
+      } else {
+        customInput.style.display = 'none';
+        trScore = parseInt(btn.dataset.score, 10);
+      }
+    });
+    customInput.addEventListener('input', () => {
+      trScore = parseInt(customInput.value, 10) || 0;
+    });
+  }
+
+  // Number of teams buttons
+  const numTeamsGrid = document.getElementById('tr-num-teams-grid');
+  if (numTeamsGrid) {
+    numTeamsGrid.addEventListener('click', e => {
+      const btn = e.target.closest('[data-num-teams]');
+      if (!btn) return;
+      numTeamsGrid.querySelectorAll('[data-num-teams]').forEach(b => b.classList.remove('tr-score-sel'));
+      btn.classList.add('tr-score-sel');
+      trNumTeams = parseInt(btn.dataset.numTeams, 10);
+      // Clamp trFirstTeamIdx to valid range
+      if (trFirstTeamIdx !== null && trFirstTeamIdx >= trNumTeams) trFirstTeamIdx = null;
+      renderTeamsContainer();
+      updateThrowFirstSelector();
+    });
+  }
+
+  // Leg format buttons (Best of / First to)
+  const fmtGrid = document.getElementById('tr-fmt-grid');
+  if (fmtGrid) {
+    fmtGrid.addEventListener('click', e => {
+      const btn = e.target.closest('[data-fmt]');
+      if (!btn) return;
+      fmtGrid.querySelectorAll('[data-fmt]').forEach(b => b.classList.remove('tr-score-sel'));
+      btn.classList.add('tr-score-sel');
+      trLegFormat = btn.dataset.fmt;
+    });
+  }
+
+  // Legs number buttons (1, 3, 5, 7)
+  const legsGrid = document.getElementById('tr-legs-grid');
+  if (legsGrid) {
+    legsGrid.addEventListener('click', e => {
+      const btn = e.target.closest('[data-legs]');
+      if (!btn) return;
+      legsGrid.querySelectorAll('[data-legs]').forEach(b => b.classList.remove('tr-score-sel'));
+      btn.classList.add('tr-score-sel');
+      trLegs = parseInt(btn.dataset.legs, 10);
+    });
+  }
+
+  // Start button
+  document.getElementById('tr-start-btn').addEventListener('click', startTraining);
+}
+
+// ── Build HTML for one team card ──────────────────────
+function buildTeamCardHtml(teamIdx) {
+  const roster = getPlayers();
+
+  // Names assigned to OTHER active teams (for greying out)
+  const otherNames = new Set();
+  for (let ti = 0; ti < trNumTeams; ti++) {
+    if (ti !== teamIdx) trTeams[ti].players.forEach(n => otherNames.add(n));
+  }
+
+  const rosterHtml = roster.length
+    ? `<div class="tr-roster-grid" id="tr-roster-grid-${teamIdx}">${
+        roster.map(p => {
+          const isSel = trTeams[teamIdx].players.includes(p.name);
+          const isDis = !isSel && otherNames.has(p.name);
+          return `<button class="tr-roster-btn${isSel ? ' tr-selected' : ''}${isDis ? ' disabled' : ''}"
+                          data-tr-name="${escHtml(p.name)}"${isDis ? ' disabled' : ''}>
+                    ${escHtml(p.name)}
+                  </button>`;
+        }).join('')
+      }</div>`
+    : `<p style="font-size:0.8rem;color:var(--text-muted);font-family:Arial,sans-serif;
+               text-align:center;padding:4px 0;">No saved roster — add names below.</p>`;
+
+  return `
+    <div class="tr-team-card" id="tr-team-card-${teamIdx}">
+      <div class="gs-section-label">Team ${teamIdx + 1}</div>
+      <input class="form-input" id="tr-team-name-${teamIdx}" type="text"
+             value="${escHtml(trTeams[teamIdx].name)}" maxlength="20"
+             placeholder="Team name"
+             style="min-height:40px;font-family:Arial,sans-serif;font-weight:400;"
+             data-team-idx="${teamIdx}"/>
+      ${rosterHtml}
+      <div style="display:flex;gap:8px;margin-top:4px;">
+        <input class="form-input" id="tr-name-input-${teamIdx}" type="text"
+               placeholder="Type a name" maxlength="32"
+               style="min-height:44px;padding:8px 12px;font-size:0.9rem;
+                      font-family:Arial,sans-serif;font-weight:400;"/>
+        <button class="btn btn-ghost" data-add-team="${teamIdx}"
+                style="flex:0 0 auto;width:48px;min-height:44px;padding:0;
+                       font-size:1.3rem;border-radius:var(--radius);">+</button>
+      </div>
+      <div class="tr-player-list" id="tr-player-list-${teamIdx}"></div>
+    </div>`;
+}
+
+// ── Render all active team cards into #tr-teams-container ─
+function renderTeamsContainer() {
+  const container = document.getElementById('tr-teams-container');
+  if (!container) return;
+  container.innerHTML = Array.from({ length: trNumTeams }, (_, i) => buildTeamCardHtml(i)).join('');
+  for (let i = 0; i < trNumTeams; i++) {
+    refreshTeamPlayerList(i);
+    attachTeamCardListeners(i);
+  }
+}
+
+// ── Attach listeners to one team card ────────────────
+function attachTeamCardListeners(teamIdx) {
+  // Team name input
+  const nameInp = document.getElementById(`tr-team-name-${teamIdx}`);
+  if (nameInp) {
+    nameInp.addEventListener('input', () => {
+      trTeams[teamIdx].name = nameInp.value.trim() || `Team ${teamIdx + 1}`;
+      updateThrowFirstSelector();
+    });
+  }
+
+  // Roster grid taps
+  const rGrid = document.getElementById(`tr-roster-grid-${teamIdx}`);
+  if (rGrid) {
+    rGrid.addEventListener('click', e => {
+      const btn = e.target.closest('.tr-roster-btn');
+      if (!btn || btn.disabled) return;
+      const name = btn.dataset.trName;
+      const idx  = trTeams[teamIdx].players.indexOf(name);
+      if (idx !== -1) {
+        trTeams[teamIdx].players.splice(idx, 1);
+      } else {
+        trTeams[teamIdx].players.push(name);
+      }
+      refreshTeamPlayerList(teamIdx);
+      refreshAllRosterGrids();
+      updateThrowFirstSelector();
+    });
+  }
+
+  // Typed name add
+  const nameTyped = document.getElementById(`tr-name-input-${teamIdx}`);
+  const addBtn    = document.querySelector(`[data-add-team="${teamIdx}"]`);
+
+  function addTypedPlayer() {
+    if (!nameTyped) return;
+    const name = nameTyped.value.trim();
+    if (!name) return;
+    if (!trTeams[teamIdx].players.includes(name)) trTeams[teamIdx].players.push(name);
+    nameTyped.value = '';
+    refreshTeamPlayerList(teamIdx);
+    refreshAllRosterGrids();
+    updateThrowFirstSelector();
+    nameTyped.focus();
+  }
+  if (addBtn)    addBtn.addEventListener('click', addTypedPlayer);
+  if (nameTyped) nameTyped.addEventListener('keydown', e => { if (e.key === 'Enter') addTypedPlayer(); });
+}
+
+// ── Refresh one team's player chip list ───────────────
+function refreshTeamPlayerList(teamIdx) {
+  const listEl = document.getElementById(`tr-player-list-${teamIdx}`);
+  if (!listEl) return;
+  const players = trTeams[teamIdx].players;
+  listEl.innerHTML = players.length
+    ? players.map((name, i) =>
+        `<div class="tr-player-row">
+          <span class="tr-num">${i + 1}.</span>
+          <span style="flex:1;">${escHtml(name)}</span>
+          <button class="tr-remove-btn" data-team-idx="${teamIdx}" data-rm-idx="${i}" title="Remove">&#10005;</button>
+        </div>`
+      ).join('')
+    : `<p style="font-size:0.8rem;color:var(--text-muted);font-family:Arial,sans-serif;
+               text-align:center;padding:4px 0;">No players yet</p>`;
+
+  listEl.querySelectorAll('.tr-remove-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const ti = parseInt(btn.dataset.teamIdx, 10);
+      const ri = parseInt(btn.dataset.rmIdx, 10);
+      trTeams[ti].players.splice(ri, 1);
+      refreshTeamPlayerList(ti);
+      refreshAllRosterGrids();
+      updateThrowFirstSelector();
+    });
+  });
+}
+
+// ── Sync all roster grid button states ────────────────
+// Players assigned to a different team are greyed out and disabled.
+function refreshAllRosterGrids() {
+  for (let i = 0; i < trNumTeams; i++) {
+    const grid = document.getElementById(`tr-roster-grid-${i}`);
+    if (!grid) continue;
+    const otherNames = new Set();
+    for (let ti = 0; ti < trNumTeams; ti++) {
+      if (ti !== i) trTeams[ti].players.forEach(n => otherNames.add(n));
+    }
+    grid.querySelectorAll('.tr-roster-btn').forEach(btn => {
+      const name  = btn.dataset.trName;
+      const isSel = trTeams[i].players.includes(name);
+      const isDis = !isSel && otherNames.has(name);
+      btn.classList.toggle('tr-selected', isSel);
+      btn.classList.toggle('disabled', isDis);
+      btn.disabled = isDis;
+    });
+  }
+}
+
+// ── Show/refresh the throw-first team selector ────────
+function updateThrowFirstSelector() {
+  const throwGroup = document.getElementById('tr-throw-group');
+  const throwGrid  = document.getElementById('tr-throw-grid');
+  if (!throwGroup || !throwGrid) return;
+
+  // Only show when every active team has at least 1 player
+  const allHavePlayers = trTeams.slice(0, trNumTeams).every(t => t.players.length >= 1);
+  if (!allHavePlayers) {
+    throwGroup.style.display = 'none';
+    trFirstTeamIdx = null;
+    return;
+  }
+
+  if (trFirstTeamIdx !== null && trFirstTeamIdx >= trNumTeams) trFirstTeamIdx = null;
+  throwGroup.style.display = '';
+  throwGrid.innerHTML = trTeams.slice(0, trNumTeams).map((team, i) =>
+    `<button class="tr-throw-btn${trFirstTeamIdx === i ? ' tr-selected' : ''}"
+             data-throw-team="${i}">${escHtml(team.name || ('Team ' + (i + 1)))}</button>`
+  ).join('');
+  throwGrid.querySelectorAll('.tr-throw-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      trFirstTeamIdx = parseInt(btn.dataset.throwTeam, 10);
+      throwGrid.querySelectorAll('.tr-throw-btn')
+        .forEach(b => b.classList.toggle('tr-selected', b === btn));
+    });
+  });
+}
+
+function startTraining() {
+  // Validate starting score
+  const score = trScore;
+  if (isNaN(score) || score < 101) {
+    const grid = document.getElementById('tr-score-grid');
+    if (grid) { grid.style.outline = '2px solid var(--danger)'; setTimeout(() => { grid.style.outline = ''; }, 1200); }
+    return;
+  }
+
+  // Validate every active team has ≥1 player
+  let allValid = true;
+  for (let i = 0; i < trNumTeams; i++) {
+    if (trTeams[i].players.length === 0) {
+      const card = document.getElementById(`tr-team-card-${i}`);
+      if (card) { card.style.outline = '2px solid var(--danger)'; setTimeout(() => { card.style.outline = ''; }, 1200); }
+      allValid = false;
+    }
+  }
+  if (!allValid) return;
+
+  // Validate throw-first selection
+  if (trFirstTeamIdx === null || trFirstTeamIdx >= trNumTeams) {
+    const tg = document.getElementById('tr-throw-grid');
+    if (tg) { tg.style.outline = '2px solid var(--danger)'; setTimeout(() => { tg.style.outline = ''; }, 1200); }
+    return;
+  }
+
+  trainingState.startingScore = score;
+  trainingState.legs          = trLegs;
+  trainingState.legFormat     = trLegFormat;
+  trainingState.teams         = trTeams.slice(0, trNumTeams).map(t => ({ name: t.name, players: t.players.slice() }));
+  trainingState.firstTeamIdx  = trFirstTeamIdx;
+
+  initTrainingScoring();
+}
+
+// ── Initialise scoring engine for training (N teams) ──
+function initTrainingScoring() {
+  const gs = gameState;
+  if (gs.flashTimer) { clearTimeout(gs.flashTimer); gs.flashTimer = null; }
+
+  const teams    = trainingState.teams;         // [{name, players:[]}]
+  const numTeams = teams.length;
+  const score    = trainingState.startingScore;
+  const firstIdx = trainingState.firstTeamIdx;
+
+  // Rotate so first-throwing team becomes index 0 → side 't0'
+  const rotated = [...teams.slice(firstIdx), ...teams.slice(0, firstIdx)];
+
+  // Build sideScores + legsWon keyed 't0'..'t(N-1)'
+  const sideScores = {};
+  const legsWon    = {};
+  rotated.forEach((_, i) => { sideScores['t' + i] = score; legsWon['t' + i] = 0; });
+
+  // Build player list grouped by team (T0 all players, then T1, …)
+  // Turn rotation is handled separately via trTeamTurn / trTeamPlayerOffset.
+  const allPlayers = [];
+  rotated.forEach((team, ti) => {
+    team.players.forEach(name => allPlayers.push({ name, side: 't' + ti }));
+  });
+
+  gs.mode           = 'training';
+  gs.format         = { score, legs: trainingState.legs, legFormat: trainingState.legFormat, label: 'Training', throw: 't0' };
+  gs.startingScore  = score;
+  gs.whoThrowsFirst = 't0';
+  gs.sideScores     = sideScores;
+  gs.legsWon        = legsWon;
+  gs.currentLeg     = 1;
+  gs.visitSeq       = 0;
+  gs.currentInput   = '';
+  gs.bustActive     = false;
+  gs.flashMsg       = null;
+  gs.numTeams       = numTeams;
+  gs.teams          = rotated.map((t, i) => ({ name: t.name, side: 't' + i }));
+  gs.players        = allPlayers.map(p => ({ name: p.name, side: p.side, visits: [] }));
+
+  // Per-team turn tracking ─────────────────────────────
+  // trTeamPlayers[i] = array of gs.players indices belonging to team i
+  gs.trTeamPlayers = rotated.map((_, ti) => {
+    const idxs = [];
+    gs.players.forEach((p, pi) => { if (p.side === 't' + ti) idxs.push(pi); });
+    return idxs;
+  });
+  gs.trTeamTurn         = 0;                          // which team throws next
+  gs.trTeamPlayerOffset = new Array(numTeams).fill(0); // which player within each team is up
+  gs.currentPlayerIndex = gs.trTeamPlayers[0][0];      // first player of first team
+
+  navigateTo('screen-scoring');
+  renderScoringScreen();
+}
+
+// ── Wrap initScoringScreen to tag match mode ──────────
+(function(){
+  const _orig = initScoringScreen;
+  window.initScoringScreen = function() {
+    gameState.mode = 'match';
+    _orig();
+  };
+}());
+
+// ── Training turn advance (team-by-team rotation) ─────
+// Always moves to the NEXT team, then picks that team's
+// current player.  The team that just threw has its own
+// within-team player offset incremented so the NEXT time
+// they throw they use the following player.
+function advanceTurnTraining() {
+  const gs = gameState;
+  const n  = gs.numTeams;
+  // Rotate the player index for the team that just threw
+  const cur      = gs.trTeamTurn;
+  const curSize  = gs.trTeamPlayers[cur].length;
+  gs.trTeamPlayerOffset[cur] = (gs.trTeamPlayerOffset[cur] + 1) % curSize;
+  // Move to next team
+  gs.trTeamTurn = (gs.trTeamTurn + 1) % n;
+  const nxt     = gs.trTeamTurn;
+  // Point currentPlayerIndex at that team's active player
+  gs.currentPlayerIndex = gs.trTeamPlayers[nxt][gs.trTeamPlayerOffset[nxt]];
+}
+
+// ── Wrap advanceTurn to branch on mode ────────────────
+(function(){
+  const _orig = advanceTurn;
+  window.advanceTurn = function() {
+    if (gameState.mode === 'training' && gameState.trTeamPlayers) {
+      advanceTurnTraining();
+    } else {
+      _orig();
+    }
+  };
+}());
+
+// ── Wrap startNewLeg for training (t0/t1/… sides, team rotation) ─
+(function(){
+  const _orig = startNewLeg;
+  window.startNewLeg = function() {
+    const gs = gameState;
+    if (gs.mode !== 'training') { _orig(); return; }
+
+    gs.currentLeg++;
+
+    // Reset all team scores to starting score
+    Object.keys(gs.sideScores).forEach(side => {
+      gs.sideScores[side] = gs.startingScore;
+    });
+
+    // Rotate first team by leg number (leg 1 → team 0, leg 2 → team 1, etc.)
+    const firstTeamIdx    = (gs.currentLeg - 1) % gs.numTeams;
+    gs.trTeamTurn         = firstTeamIdx;
+    gs.currentPlayerIndex = gs.trTeamPlayers[firstTeamIdx][gs.trTeamPlayerOffset[firstTeamIdx]];
+
+    gs.flashMsg = { text: `LEG ${gs.currentLeg}`, cls: 'leg-flash' };
+    renderScoringUI();
+
+    if (gs.flashTimer) clearTimeout(gs.flashTimer);
+    gs.flashTimer = setTimeout(() => {
+      gs.flashMsg   = null;
+      gs.flashTimer = null;
+      renderScoringUI();
+    }, 1800);
+  };
+}());
+
+// ── Wrap handleLegWin to support training 'firstto' / 'bestof' ────
+(function(){
+  const _orig = handleLegWin;
+  window.handleLegWin = function(winningSide) {
+    const gs  = gameState;
+    const fmt = gs.format;
+    // Single leg or match mode: use original logic (match is always best-of)
+    if (gs.mode !== 'training' || fmt.legs === 1) { _orig(winningSide); return; }
+
+    gs.legsWon[winningSide]++;
+    const won    = gs.legsWon[winningSide];
+    const target = fmt.legFormat === 'firstto'
+      ? fmt.legs                   // First to N: reach exactly N
+      : Math.ceil(fmt.legs / 2);   // Best of N: majority
+    if (won >= target) {
+      recordGameWinner(winningSide);
+    } else {
+      startNewLeg();
+    }
+  };
+}());
+
+// ── Wrap recordGameWinner to branch on mode ───────────
+(function(){
+  const _orig = recordGameWinner;
+  window.recordGameWinner = function(side) {
+    if (gameState.mode === 'training') {
+      renderTrainingStats(side);
+      navigateTo('screen-training-stats');
+    } else {
+      _orig(side);
+    }
+  };
+}());
+
+// ── Wrap renderScoringScreen: replace 2-panel bar with N-team bar in training ─
+(function(){
+  const _orig = renderScoringScreen;
+  window.renderScoringScreen = function() {
+    _orig();
+    // Always sync multi-training class (handles match→training and training→match transitions)
+    const scrEl = document.getElementById('screen-scoring');
+    if (scrEl) scrEl.classList.toggle('sc-multi-training', gameState.mode === 'training' && gameState.numTeams > 2);
+    if (gameState.mode !== 'training') return;
+    const gs = gameState;
+
+    // Patch top bar for training (replace 3-section bar with simple training info)
+    const bar = document.querySelector('#screen-scoring .sc-topbar');
+    if (bar) {
+      const fmt       = gs.format;
+      const multiLeg  = fmt && fmt.legs > 1;
+      const fmtLabel  = multiLeg
+        ? (fmt.legFormat === 'firstto' ? 'First to ' : 'Best of ') + fmt.legs
+        : gs.numTeams + ' team' + (gs.numTeams > 1 ? 's' : '');
+      const legsCenter = multiLeg
+        ? `<span style="display:flex;flex-direction:column;align-items:center;justify-content:center;` +
+          `min-width:60px;border-left:1px solid var(--border);border-right:1px solid var(--border);` +
+          `padding:2px 6px;background:#111;align-self:stretch;">` +
+          `<span id="tr-legs-display" style="font-size:14px;font-weight:900;color:var(--accent);` +
+          `font-family:'Arial Black',Arial,sans-serif;line-height:1;">` +
+          (gs.teams || []).map(t => gs.legsWon[t.side] || 0).join('–') +
+          `</span>` +
+          `<span style="font-size:7px;color:var(--text-muted);letter-spacing:1px;` +
+          `text-transform:uppercase;font-family:Arial,sans-serif;">LEGS</span></span>`
+        : '';
+      bar.innerHTML =
+        `<span style="flex:1;display:flex;align-items:center;padding:0 12px;font-size:13px;` +
+        `font-weight:700;color:var(--accent);font-family:Arial,sans-serif;">` +
+        `&#127985;&nbsp;Training</span>` +
+        legsCenter +
+        `<span style="flex:1;display:flex;align-items:center;justify-content:flex-end;` +
+        `padding:0 12px;font-size:10px;color:var(--text-muted);font-family:Arial,sans-serif;">` +
+        `${gs.startingScore} &bull; ${escHtml(fmtLabel)}</span>`;
+    }
+
+    // Replace fixed 2-panel score bar with N-panel training bar
+    const scoreBar = document.getElementById('sc-score-bar');
+    if (scoreBar) {
+      scoreBar.className  = `sc-train-bar teams-${gs.numTeams}`;
+      scoreBar.style.cssText = '';   // clear any match-mode inline styles
+      scoreBar.innerHTML  = (gs.teams || []).map((team, i) =>
+        `<div class="sc-train-panel" id="sc-panel-t${i}">
+           <div class="score-team">${escHtml(team.name)}</div>
+           <div class="score-remaining" id="sc-rem-t${i}">${gs.sideScores['t' + i]}</div>
+           <div class="score-players" id="sc-names-t${i}"></div>
+         </div>`
+      ).join('');
+    }
+  };
+}());
+
+// ── Training stats screen (N teams) ──────────────────
+function renderTrainingStats(winningSide) {
+  const gs  = gameState;
+  const scr = document.getElementById('screen-training-stats');
+  if (!scr) return;
+
+  function playerStats(p) {
+    const scored = p.visits.filter(v => !v.wasBust);
+    const total  = scored.reduce((s, v) => s + v.scored, 0);
+    const visits = scored.length;
+    const avg    = visits > 0 ? (total / visits).toFixed(1) : '—';
+    const high   = visits > 0 ? Math.max(...scored.map(v => v.scored)) : 0;
+    const c90    = scored.filter(v => v.scored >= 90).length;
+    const c180   = scored.filter(v => v.scored === 180).length;
+    const darts  = visits * 3;
+    const lastV  = scored[scored.length - 1];
+    const checkout = (lastV && lastV.remaining === 0) ? lastV.scored : null;
+    return { avg, high, c90, c180, darts, checkout };
+  }
+
+  // Winner team name
+  const winningTeam = (gs.teams || []).find(t => t.side === winningSide);
+  const winnerName  = winningTeam ? winningTeam.name : winningSide;
+
+  // Best checkout among winning team's players
+  let bestCheckout = null;
+  gs.players.filter(p => p.side === winningSide).forEach(p => {
+    const st = playerStats(p);
+    if (st.checkout !== null && (bestCheckout === null || st.checkout > bestCheckout)) {
+      bestCheckout = st.checkout;
+    }
+  });
+
+  // Build table rows grouped by team
+  const tableRows = (gs.teams || []).map(team => {
+    const isWin      = team.side === winningSide;
+    const teamHeader = `<tr style="background:rgba(255,255,255,0.05);">
+      <td colspan="7" style="text-align:left;padding:6px 8px;font-size:0.68rem;
+          color:var(--text-muted);letter-spacing:2px;text-transform:uppercase;
+          font-family:Arial,sans-serif;">
+        ${escHtml(team.name)}${isWin ? ' &#127942;' : ''}
+      </td>
+    </tr>`;
+    const playerRows = gs.players.filter(p => p.side === team.side).map(p => {
+      const st = playerStats(p);
+      return `<tr>
+        <td style="text-align:left;font-size:0.85rem;color:var(--text-dim);">${escHtml(p.name)}</td>
+        <td${isWin ? ' class="stat-winner"' : ''}>${st.avg}</td>
+        <td${isWin ? ' class="stat-winner"' : ''}>${st.high || '—'}</td>
+        <td${isWin ? ' class="stat-winner"' : ''}>${st.c90}</td>
+        <td${isWin ? ' class="stat-winner"' : ''}>${st.c180}</td>
+        <td${isWin ? ' class="stat-winner"' : ''}>${st.darts}</td>
+        <td${isWin ? ' class="stat-winner"' : ''}>${st.checkout !== null ? st.checkout : '—'}</td>
+      </tr>`;
+    }).join('');
+    return teamHeader + playerRows;
+  }).join('');
+
+  scr.innerHTML = `
+    <div>
+      <div class="page-title">Training</div>
+      <div class="page-subtitle">Session complete</div>
+    </div>
+
+    <div class="stats-winner-banner">
+      <div class="stats-winner-label">Winner</div>
+      <div class="stats-winner-name">${escHtml(winnerName)}</div>
+      <div class="stats-winner-sub">
+        ${trainingState.startingScore} &bull; ${gs.numTeams} team${gs.numTeams > 1 ? 's' : ''}
+      </div>
+    </div>
+
+    ${bestCheckout !== null ? `
+    <div class="checkout-highlight">
+      <div>
+        <div class="checkout-label">WINNING CHECKOUT</div>
+        <div class="checkout-value">${bestCheckout}</div>
+      </div>
+      <div style="font-size:2rem;">&#127919;</div>
+    </div>` : ''}
+
+    <div class="card">
+      <div class="card-title">Player Statistics</div>
+      <div style="overflow-x:auto;">
+        <table class="stats-table" style="min-width:420px;">
+          <thead>
+            <tr>
+              <th style="text-align:left;">Player</th>
+              <th>Avg</th><th>High</th><th>90+</th>
+              <th>180s</th><th>Darts</th><th>Checkout</th>
+            </tr>
+          </thead>
+          <tbody>${tableRows}</tbody>
+        </table>
+      </div>
+    </div>
+
+    <button class="btn btn-secondary" id="tr-save-btn">
+      &#128190;&nbsp; Save Session
+    </button>
+    <button class="btn btn-ghost" id="tr-again-btn">
+      &#8635;&nbsp; Play Again
+    </button>
+    <button class="btn btn-secondary" id="tr-home-btn">
+      &#8962;&nbsp; Home
+    </button>`;
+
+  document.getElementById('tr-save-btn').addEventListener('click', function() {
+    saveTrainingSession(winningSide);
+    this.textContent = '✓ Saved!';
+    this.disabled = true;
+  });
+
+  document.getElementById('tr-again-btn').addEventListener('click', () => {
+    screenStack.length = 0;
+    showScreen('screen-training');
+    renderTrainingSetup();
+  });
+
+  document.getElementById('tr-home-btn').addEventListener('click', () => {
+    screenStack.length = 0;
+    showScreen('screen-home');
+  });
+}
+
+// ── Save training session ─────────────────────────────
+function saveTrainingSession(winningSide) {
+  const gs     = gameState;
+  const record = {
+    id:           makeId(),
+    date:         new Date().toISOString(),
+    startingScore: trainingState.startingScore,
+    numTeams:     gs.numTeams,
+    teams:        (gs.teams || []).map(team => {
+      const teamPlayers = gs.players.filter(p => p.side === team.side);
+      return {
+        name:   team.name,
+        winner: team.side === winningSide,
+        players: teamPlayers.map(p => {
+          const scored = p.visits.filter(v => !v.wasBust);
+          const total  = scored.reduce((s, v) => s + v.scored, 0);
+          return {
+            name:  p.name,
+            avg:   scored.length > 0 ? (total / scored.length).toFixed(1) : 0,
+            darts: scored.length * 3,
+          };
+        }),
+      };
+    }),
+    winner: (gs.teams || []).find(t => t.side === winningSide)
+              ? (gs.teams.find(t => t.side === winningSide).name) : winningSide,
+  };
+  try {
+    const hist = JSON.parse(localStorage.getItem(TRAINING_HISTORY_KEY) || '[]');
+    hist.unshift(record);
+    localStorage.setItem(TRAINING_HISTORY_KEY, JSON.stringify(hist));
+  } catch (e) {}
+}
+
+// ── Match history screen render ───────────────────────
+function renderMatchHistory() {
+  const listEl = document.getElementById('match-history-list');
+  if (!listEl) return;
+
+  let records = [];
+  try { records = JSON.parse(localStorage.getItem(MATCH_HISTORY_KEY) || '[]'); } catch (e) {}
+
+  if (!records.length) {
+    listEl.innerHTML = `
+      <div class="empty-state">
+        <div class="empty-icon">&#128203;</div>
+        <div class="empty-text">
+          No matches saved yet.<br>Complete a full match night to see results here.
+        </div>
+      </div>`;
+    return;
+  }
+
+  listEl.innerHTML = records.map((r, ri) => {
+    const homeWon = r.points.home > r.points.away;
+    const awayWon = r.points.away > r.points.home;
+
+    const gameRows = (r.games || []).map(g => {
+      const winTeam = g.winner === 'home' ? r.homeTeam : r.awayTeam;
+      const phdStr  = (g.phd || []).join(', ');
+      const oppStr  = (g.opp || []).join(', ');
+      return `
+        <div class="hm-game-row">
+          <span class="hm-game-label">G${g.gameNum || '?'} ${g.format ? escHtml(g.format.label) : ''}</span>
+          <span class="hm-game-winner">${escHtml(winTeam)}</span>
+          <span class="hm-game-players">${escHtml(phdStr)} vs ${escHtml(oppStr)}</span>
+        </div>`;
+    }).join('');
+
+    return `
+    <div class="history-match-card">
+      <div class="history-match-header">
+        <span class="history-match-date">${formatDate(r.date)}</span>
+        <button class="hm-del-btn" data-del-idx="${ri}">&#128465;&nbsp;Delete</button>
+      </div>
+      <div class="history-match-teams" style="cursor:pointer;" data-expand-idx="${ri}">
+        <div class="history-team">
+          <div class="history-team-name${homeWon ? ' winner' : ''}">${escHtml(r.homeTeam)}</div>
+        </div>
+        <div class="history-score">${r.points.home}&ndash;${r.points.away}</div>
+        <div class="history-team">
+          <div class="history-team-name${awayWon ? ' winner' : ''}">${escHtml(r.awayTeam)}</div>
+        </div>
+      </div>
+      ${gameRows ? `
+      <div class="history-match-footer" style="cursor:pointer;" data-expand-idx="${ri}">
+        <span class="history-high-score">Tap to see game results</span>
+        <span style="color:var(--accent);">&#9660;</span>
+      </div>
+      <div class="hm-expand" id="hm-expand-${ri}">${gameRows}</div>` : ''}
+    </div>`;
+  }).join('');
+
+  // Expand/collapse on row tap
+  listEl.querySelectorAll('[data-expand-idx]').forEach(el => {
+    el.addEventListener('click', () => {
+      const exp = document.getElementById(`hm-expand-${el.dataset.expandIdx}`);
+      if (exp) exp.classList.toggle('open');
+    });
+  });
+
+  // Delete individual record
+  listEl.querySelectorAll('.hm-del-btn').forEach(btn => {
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      let recs = [];
+      try { recs = JSON.parse(localStorage.getItem(MATCH_HISTORY_KEY) || '[]'); } catch (e) {}
+      recs.splice(parseInt(btn.dataset.delIdx, 10), 1);
+      localStorage.setItem(MATCH_HISTORY_KEY, JSON.stringify(recs));
+      renderMatchHistory();
+    });
+  });
+}
+
+// ── Clear all match history ───────────────────────────
+(function(){
+  const btn = document.getElementById('btn-clear-history');
+  if (!btn) return;
+  btn.addEventListener('click', () => {
+    if (!confirm('Delete all match history? This cannot be undone.')) return;
+    localStorage.removeItem(MATCH_HISTORY_KEY);
+    renderMatchHistory();
+  });
+}());
+
+// ── Match auto-save (after game 9 completes) ──────────
+function saveMatchToHistory() {
+  const record = {
+    id:       makeId(),
+    date:     new Date().toISOString(),
+    homeTeam: matchState.homeTeam,
+    awayTeam: matchState.awayTeam,
+    points:   { home: matchState.points.home, away: matchState.points.away },
+    games:    matchState.games.map(g => ({
+      gameNum: g.gameNum,
+      format:  g.format ? { label: g.format.label, score: g.format.score } : null,
+      phd:     g.phd  || [],
+      opp:     g.opp  || [],
+      winner:  g.winner,
+    })),
+  };
+  try {
+    const hist = JSON.parse(localStorage.getItem(MATCH_HISTORY_KEY) || '[]');
+    hist.unshift(record);
+    localStorage.setItem(MATCH_HISTORY_KEY, JSON.stringify(hist));
+  } catch (e) {}
+}
+
+// Add second listener on Next Game button — fires after Phase 4's listener
+// (which already incremented currentGame), checks if match is complete
+(function(){
+  const nextBtn = document.getElementById('btn-next-game');
+  if (!nextBtn) return;
+  nextBtn.addEventListener('click', () => {
+    // Phase 4 already incremented matchState.currentGame
+    if (gameState.mode !== 'training' && matchState.currentGame > 9) {
+      saveMatchToHistory();
+    }
+  });
+}());
+
+// Also auto-save if user taps "Finish Match" while on the last game
+(function(){
+  const finBtn = document.getElementById('btn-finish-match');
+  if (!finBtn) return;
+  finBtn.addEventListener('click', () => {
+    if (gameState.mode !== 'training' && matchState.currentGame === 9 &&
+        matchState.games[8] && matchState.games[8].winner) {
+      saveMatchToHistory();
+    }
+  });
+}());
+
+// ── Initial renders (direct calls, no navigateTo involved) ───
+renderTrainingSetup();
+renderMatchHistory();
+
+// ── Boot: show home screen as the definitive last act ────────
+showScreen('screen-home');
+screenStack.length = 0;
+console.log('[boot] showScreen(screen-home) complete — active:',
+  document.querySelector('.screen.active') && document.querySelector('.screen.active').id);
+
+// ── Wrap navigateTo AFTER boot so it cannot fire during init ─
+// Any navigateTo('screen-training') or ('screen-history') call
+// that happened before this point would have used the raw Phase 2
+// navigateTo and NOT triggered the re-render side effects.
+(function(){
+  const _orig = navigateTo;
+  window.navigateTo = function(id) {
+    _orig(id);
+    if (id === 'screen-history')  renderMatchHistory();
+    if (id === 'screen-training') renderTrainingSetup();
+  };
+}());
+
+console.log('All scripts complete');
