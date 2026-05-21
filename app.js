@@ -634,19 +634,19 @@ renderMatchSetup();
     // ── MAIN TABLE (capped height, scrollable) ────────
     '.sc-table-wrap{flex:1;min-height:0;overflow-y:auto;background:#1a1a1a;}',
     '.sc-table-wrap::-webkit-scrollbar{width:4px;}.sc-table-wrap::-webkit-scrollbar-track{background:#111;}.sc-table-wrap::-webkit-scrollbar-thumb{background:#444;border-radius:2px;}',
-    '.sc-tbl-head{display:grid;grid-template-columns:1fr 1.4fr 36px 1.4fr 1fr;background:#1e1e1e;border-bottom:2px solid #333;position:sticky;top:0;z-index:2;}',
+    '.sc-tbl-head{display:grid;grid-template-columns:1fr 1.4fr 48px 1.4fr 1fr;background:#1e1e1e;border-bottom:2px solid #333;position:sticky;top:0;z-index:2;}',
     '.sc-tbl-head>div{padding:3px 6px;font-size:14px;font-weight:700;color:#888;letter-spacing:1px;text-transform:uppercase;font-family:Arial,sans-serif;display:flex;align-items:center;}',
-    '.sc-tbl-row{display:grid;grid-template-columns:1fr 1.4fr 36px 1.4fr 1fr;border-bottom:1px solid #333;min-height:40px;}',
+    '.sc-tbl-row{display:grid;grid-template-columns:1fr 1.4fr 48px 1.4fr 1fr;border-bottom:1px solid #333;min-height:56px;}',
     '.sc-tbl-row:nth-child(odd){background:#1a1a1a;}',
     '.sc-tbl-row:nth-child(even){background:#222;}',
     '.sc-tbl-row:not(.sc-tbl-start):not(.sc-tbl-pending){cursor:pointer;}',
     '.sc-tbl-row:not(.sc-tbl-start):not(.sc-tbl-pending):hover{background:#2a2a2a;}',
     '.sc-tbl-row>div{padding:3px 6px;font-size:13px;font-family:Arial,sans-serif;color:#ccc;display:flex;align-items:center;}',
-    '.sc-tbl-c1{justify-content:flex-end;font-size:13px;font-weight:600;color:#999;border-right:1px solid #555;}',
-    '.sc-tbl-c2{justify-content:flex-end;font-size:22px;font-weight:900;color:#fff;font-family:"Arial Black",Arial,sans-serif;}',
+    '.sc-tbl-c1{justify-content:flex-end;font-size:1.8rem;font-weight:700;color:#999;border-right:1px solid #555;overflow:hidden;}',
+    '.sc-tbl-c2{justify-content:flex-end;font-size:2.8rem;font-weight:900;color:#fff;font-family:"Arial Black",Arial,sans-serif;overflow:hidden;}',
     '.sc-tbl-c3{justify-content:center;background:#161616;color:#555;font-size:10px;border-left:1px solid #333;border-right:1px solid #333;}',
-    '.sc-tbl-c4{justify-content:flex-start;font-size:22px;font-weight:900;color:#fff;font-family:"Arial Black",Arial,sans-serif;border-right:1px solid #555;}',
-    '.sc-tbl-c5{justify-content:flex-start;font-size:13px;font-weight:600;color:#999;}',
+    '.sc-tbl-c4{justify-content:flex-start;font-size:2.8rem;font-weight:900;color:#fff;font-family:"Arial Black",Arial,sans-serif;border-right:1px solid #555;overflow:hidden;}',
+    '.sc-tbl-c5{justify-content:flex-start;font-size:1.8rem;font-weight:700;color:#999;overflow:hidden;}',
     '.sc-tbl-start{background:#161616!important;cursor:default!important;}',
     '.sc-tbl-start>div{color:#555!important;font-size:11px!important;font-weight:400!important;font-style:italic;}',
     '.sc-tbl-pending{cursor:default!important;}',
@@ -1057,7 +1057,7 @@ function renderVisitHistory() {
     <div class="sc-tbl-head">
       <div class="sc-tbl-c1">Scored</div>
       <div class="sc-tbl-c2">To Go</div>
-      <div class="sc-tbl-c3">DARTS</div>
+      <div class="sc-tbl-c3">#</div>
       <div class="sc-tbl-c4">To Go</div>
       <div class="sc-tbl-c5">Scored</div>
     </div>
