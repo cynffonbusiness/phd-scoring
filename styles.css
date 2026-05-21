@@ -1,4 +1,5 @@
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+.numpad-flash{background:#E8520A!important;border-color:#E8520A!important;color:#fff!important;}
 :root{--bg:#111111;--bg-card:#1a1a1a;--bg-raised:#222222;--accent:#E8520A;--accent-dim:#b03f07;--accent-glow:rgba(232,82,10,0.25);--text:#ffffff;--text-muted:#888888;--text-dim:#cccccc;--danger:#e03333;--success:#2db84c;--border:#333333;--radius:10px;--radius-lg:16px}
 html{height:100%;background:#111111;overscroll-behavior:none;overflow:hidden;}
 body{height:100vh;min-height:100vh;display:flex;flex-direction:column;overflow:hidden;overscroll-behavior:none;background:#111111;color:#ffffff;font-family:'Inter','Segoe UI',sans-serif;}

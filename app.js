@@ -1134,6 +1134,26 @@ function bindNumpad() {
     const btn = e.target.closest('[data-sc-val]');
     if (btn) handleNumpadInput(btn.dataset.scVal);
   });
+
+  // Flash feedback — covers both #sc-numpad and .sc-action-row buttons.
+  // touchstart fires immediately on iOS; click handles desktop/mouse.
+  // A flag prevents double-flash when both events fire on the same tap.
+  const area = grid.closest('.sc-numpad-area');
+  if (!area) return;
+  let flashPending = false;
+  function flashBtn(btn) {
+    if (!btn) return;
+    flashPending = true;
+    btn.classList.add('numpad-flash');
+    setTimeout(() => { btn.classList.remove('numpad-flash'); flashPending = false; }, 150);
+  }
+  area.addEventListener('touchstart', e => {
+    flashBtn(e.target.closest('.numpad-btn'));
+  }, { passive: true });
+  area.addEventListener('click', e => {
+    if (flashPending) return; // already flashed via touchstart
+    flashBtn(e.target.closest('.numpad-btn'));
+  });
 }
 
 // ── Numpad input handler ──────────────────────────────
