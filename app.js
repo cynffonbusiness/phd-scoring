@@ -635,7 +635,7 @@ renderMatchSetup();
     '.sc-table-wrap{flex:1;min-height:0;overflow-y:auto;background:#1a1a1a;}',
     '.sc-table-wrap::-webkit-scrollbar{width:4px;}.sc-table-wrap::-webkit-scrollbar-track{background:#111;}.sc-table-wrap::-webkit-scrollbar-thumb{background:#444;border-radius:2px;}',
     '.sc-tbl-head{display:grid;grid-template-columns:1fr 1.4fr 48px 1fr 1.4fr;background:#1e1e1e;border-bottom:2px solid #333;position:sticky;top:0;z-index:2;}',
-    '.sc-tbl-head>div{padding:3px 6px;font-size:14px;font-weight:700;color:#888;letter-spacing:1px;text-transform:uppercase;font-family:Arial,sans-serif;display:flex;align-items:center;}',
+    '.sc-tbl-head>div{padding:3px 6px;font-size:11px;font-weight:700;color:#888;letter-spacing:1px;text-transform:uppercase;font-family:Arial,sans-serif;display:flex;align-items:center;}',
     '.sc-tbl-row{display:grid;grid-template-columns:1fr 1.4fr 48px 1fr 1.4fr;border-bottom:1px solid #333;min-height:120px;}',
     '.sc-tbl-row:nth-child(odd){background:#1a1a1a;}',
     '.sc-tbl-row:nth-child(even){background:#222;}',
