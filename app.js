@@ -2514,6 +2514,7 @@ function saveMatchToHistory() {
     '.bracket-player:not([disabled]):not(.bp-bye):hover{background:var(--bg-raised);}',
     '.bracket-player.bp-win{background:rgba(232,82,10,0.18);color:var(--accent);font-weight:700;}',
     '.bracket-player.bp-bye{color:var(--text-muted);font-style:italic;cursor:default;font-size:0.8rem;}',
+    '.bracket-player.bp-tbd{color:#555;font-style:italic;cursor:default;font-size:0.8rem;}',
     '.bracket-player.bp-out{color:#444;cursor:default;text-decoration:line-through;}',
     '.bracket-vs{text-align:center;font-size:0.55rem;color:var(--border);font-family:Arial,sans-serif;padding:2px 0;border-top:1px solid var(--border);border-bottom:1px solid var(--border);letter-spacing:2px;}',
     '.trn-champ-banner{background:linear-gradient(135deg,var(--accent),var(--accent-dim));border-radius:var(--radius-lg);padding:20px 16px;text-align:center;flex-shrink:0;}',
@@ -2555,53 +2556,103 @@ function buildBracket(players) {
   const shuffled = trnShuffle(players);
   let size = 1;
   while (size < shuffled.length) size *= 2;
-  while (shuffled.length < size) shuffled.push(null); // null = BYE
+  while (shuffled.length < size) shuffled.push(null); // null = BYE slot
 
-  const round1 = [];
-  for (let i = 0; i < size; i += 2) {
-    const match = { p1: shuffled[i], p2: shuffled[i + 1], winner: null };
-    if (!match.p1) match.winner = match.p2;
-    else if (!match.p2) match.winner = match.p1;
-    round1.push(match);
+  // Build ALL rounds upfront as empty shells — full bracket visible from the start
+  const numRounds = Math.round(Math.log2(size));
+  const rounds = [];
+  for (let r = 0; r < numRounds; r++) {
+    const matchCount = size >> (r + 1); // size / 2^(r+1)
+    const round = [];
+    for (let i = 0; i < matchCount; i++) {
+      if (r === 0) {
+        // Round 0: real players or BYE (null)
+        round.push({ p1: shuffled[i * 2], p2: shuffled[i * 2 + 1], winner: null, resolved: false });
+      } else {
+        // Later rounds: sides unknown (undefined = TBD) until upstream resolves
+        round.push({ p1: undefined, p2: undefined, winner: null, resolved: false });
+      }
+    }
+    rounds.push(round);
   }
 
   tournamentState = {
     players,
-    rounds: [round1],
+    rounds,
     currentRound: 0,
     champion: null,
     createdAt: new Date().toISOString()
   };
 
-  checkTrnAdvance();
+  // Auto-resolve any BYE matches in round 0 and propagate into later rounds
+  rounds[0].forEach((_, mi) => trnTryResolve(0, mi));
+  trnUpdateCurrentRound();
   saveTournamentState();
 }
 
-function checkTrnAdvance() {
-  const round = tournamentState.rounds[tournamentState.currentRound];
-  if (!round || !round.every(m => m.winner)) return;
-  if (round.length === 1) { tournamentState.champion = round[0].winner; return; }
-
-  const next = [];
-  const winners = round.map(m => m.winner);
-  for (let i = 0; i < winners.length; i += 2) {
-    const match = { p1: winners[i], p2: winners[i + 1] || null, winner: null };
-    if (!match.p2) match.winner = match.p1;
-    else if (!match.p1) match.winner = match.p2;
-    next.push(match);
+// Try to auto-resolve a match when both sides are known (BYE logic, not user picks)
+function trnTryResolve(ri, mi) {
+  const match = tournamentState.rounds[ri] && tournamentState.rounds[ri][mi];
+  if (!match || match.resolved) return;
+  if (match.p1 === undefined || match.p2 === undefined) return; // sides not yet known
+  // BYE vs BYE — neither side is a real player; propagate null (bye) forward
+  if (match.p1 === null && match.p2 === null) {
+    match.resolved = true;
+    trnPropagate(ri, mi, null);
+  // BYE on left — right player auto-advances
+  } else if (match.p1 === null) {
+    match.winner = match.p2;
+    match.resolved = true;
+    trnPropagate(ri, mi, match.winner);
+  // BYE on right — left player auto-advances
+  } else if (match.p2 === null) {
+    match.winner = match.p1;
+    match.resolved = true;
+    trnPropagate(ri, mi, match.winner);
   }
-  tournamentState.rounds.push(next);
-  tournamentState.currentRound++;
-  saveTournamentState();
-  checkTrnAdvance();
+  // else: two real players — needs a user tap
+}
+
+// Feed a result (player name or null for BYE) into the correct slot of the next round
+function trnPropagate(ri, mi, winner) {
+  const nextRound = tournamentState.rounds[ri + 1];
+  if (!nextRound) return; // this was the final — champion set by trnUpdateCurrentRound
+  const nextMi    = Math.floor(mi / 2);
+  const nextMatch = nextRound[nextMi];
+  if (!nextMatch) return;
+  if (mi % 2 === 0) nextMatch.p1 = winner; // even index → feeds p1 slot
+  else              nextMatch.p2 = winner; // odd  index → feeds p2 slot
+  trnTryResolve(ri + 1, nextMi); // both sides now known? try to auto-resolve
+}
+
+// Walk currentRound forward past fully-resolved rounds; set champion when final is done
+function trnUpdateCurrentRound() {
+  const ts = tournamentState;
+  while (ts.currentRound < ts.rounds.length) {
+    const round = ts.rounds[ts.currentRound];
+    if (round.every(m => m.resolved)) {
+      if (ts.currentRound === ts.rounds.length - 1) {
+        ts.champion = round[0].winner; // final resolved — set champion
+        break;
+      }
+      ts.currentRound++;
+    } else {
+      break; // round has outstanding picks
+    }
+  }
 }
 
 function pickTrnWinner(roundIdx, matchIdx, playerKey) {
-  const match = tournamentState && tournamentState.rounds[roundIdx] && tournamentState.rounds[roundIdx][matchIdx];
-  if (!match || match.winner) return;
-  match.winner = match[playerKey];
-  if (!match.winner) return;
-  checkTrnAdvance();
+  const ts = tournamentState;
+  if (!ts) return;
+  const match = ts.rounds[roundIdx] && ts.rounds[roundIdx][matchIdx];
+  if (!match || match.resolved) return;
+  const winner = match[playerKey];
+  if (!winner) return; // guard: can't pick a BYE or undefined slot
+  match.winner   = winner;
+  match.resolved = true;
+  trnPropagate(roundIdx, matchIdx, winner);
+  trnUpdateCurrentRound();
   saveTournamentState();
   renderTournamentBracket();
 }
@@ -2807,20 +2858,25 @@ function renderTournamentBracket() {
     `;
 
     round.forEach((match, mi) => {
-      const canPick = isActive && !match.winner;
-      const p1Null  = !match.p1, p2Null = !match.p2;
-      const p1Name  = match.p1 || 'BYE';
-      const p2Name  = match.p2 || 'BYE';
-      const p1Win   = !!(match.winner && match.winner === match.p1);
-      const p2Win   = !!(match.winner && match.winner === match.p2);
-      const p1cls   = p1Null ? ' bp-bye' : p1Win ? ' bp-win' : (match.winner ? ' bp-out' : '');
-      const p2cls   = p2Null ? ' bp-bye' : p2Win ? ' bp-win' : (match.winner ? ' bp-out' : '');
-      const p1attr  = (canPick && !p1Null) ? `data-pick-r="${ri}" data-pick-m="${mi}" data-pick-p="p1"` : 'disabled';
-      const p2attr  = (canPick && !p2Null) ? `data-pick-r="${ri}" data-pick-m="${mi}" data-pick-p="p2"` : 'disabled';
+      // p1/p2 can be: string (player), null (BYE), undefined (TBD — not yet known)
+      const p1Tbd  = match.p1 === undefined;
+      const p2Tbd  = match.p2 === undefined;
+      const p1Null = match.p1 === null;
+      const p2Null = match.p2 === null;
+      const p1Name = p1Tbd ? 'TBD' : (p1Null ? 'BYE' : match.p1);
+      const p2Name = p2Tbd ? 'TBD' : (p2Null ? 'BYE' : match.p2);
+      const p1Win  = !!(match.winner && match.winner === match.p1);
+      const p2Win  = !!(match.winner && match.winner === match.p2);
+      const p1cls  = p1Tbd ? ' bp-tbd' : p1Null ? ' bp-bye' : p1Win ? ' bp-win' : (match.winner ? ' bp-out' : '');
+      const p2cls  = p2Tbd ? ' bp-tbd' : p2Null ? ' bp-bye' : p2Win ? ' bp-win' : (match.winner ? ' bp-out' : '');
+      // Only allow picks on the active round, both sides must be real players, match not yet resolved
+      const canPick = isActive && !match.resolved && !p1Tbd && !p2Tbd && !p1Null && !p2Null;
+      const p1attr  = canPick ? `data-pick-r="${ri}" data-pick-m="${mi}" data-pick-p="p1"` : 'disabled';
+      const p2attr  = canPick ? `data-pick-r="${ri}" data-pick-m="${mi}" data-pick-p="p2"` : 'disabled';
 
       html += `
         <div class="bracket-slot" style="flex:${slotFlex};">
-          <div class="bracket-match${canPick ? ' bm-active' : ''}${match.winner ? ' bm-done' : ''}">
+          <div class="bracket-match${canPick ? ' bm-active' : ''}${match.resolved ? ' bm-done' : ''}">
             <button class="bracket-player${p1cls}" ${p1attr}>${escHtml(p1Name)}</button>
             <div class="bracket-vs">vs</div>
             <button class="bracket-player${p2cls}" ${p2attr}>${escHtml(p2Name)}</button>
