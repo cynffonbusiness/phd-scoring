@@ -685,6 +685,13 @@ renderMatchSetup();
     '#sc-numpad .numpad-btn:active{background:#2a2a2a;}',
     '#sc-numpad .numpad-confirm{background:var(--accent);border-color:var(--accent);}',
     '#sc-numpad .numpad-del{background:#2a1a1a;border-color:var(--danger);color:var(--danger);}',
+    // Undo confirmation popup
+    '.undo-popup-overlay{position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.78);}',
+    '.undo-popup-box{background:#1e1e1e;border:1px solid #444;border-radius:14px;padding:26px 22px;min-width:260px;max-width:320px;text-align:center;box-shadow:0 8px 32px rgba(0,0,0,0.6);}',
+    '.undo-popup-title{font-size:1.1rem;font-weight:700;color:#fff;font-family:Arial,sans-serif;margin-bottom:20px;letter-spacing:0.3px;}',
+    '.undo-popup-btns{display:flex;gap:10px;}',
+    '.undo-popup-yes{flex:1;min-height:50px;background:var(--accent);color:#fff;border:none;border-radius:9px;font-size:0.95rem;font-weight:700;cursor:pointer;font-family:Arial,sans-serif;-webkit-tap-highlight-color:transparent;}',
+    '.undo-popup-no{flex:1;min-height:50px;background:#2a2a2a;color:#bbb;border:1px solid #555;border-radius:9px;font-size:0.95rem;font-weight:700;cursor:pointer;font-family:Arial,sans-serif;-webkit-tap-highlight-color:transparent;}',
   ].join('');
   document.head.appendChild(s);
 }());
@@ -904,6 +911,15 @@ function renderScoringUI() {
     if (gs.format && gs.format.legs > 1) {
       const ldisp = document.getElementById('tr-legs-display');
       if (ldisp) ldisp.textContent = (gs.teams || []).map(t => gs.legsWon[t.side] || 0).join('–');
+    }
+    // Refresh training topbar team name highlights
+    const trBarLeft = document.getElementById('tr-bar-left');
+    if (trBarLeft) {
+      trBarLeft.innerHTML = `<span class="sc-top-player${cp.side === 't0' ? ' sc-top-player-active' : ''}">${escHtml(gs.teams && gs.teams[0] ? gs.teams[0].name : '')}</span>`;
+    }
+    const trBarRight = document.getElementById('tr-bar-right');
+    if (trBarRight) {
+      trBarRight.innerHTML = `<span class="sc-top-player${cp.side === 't1' ? ' sc-top-player-active' : ''}">${escHtml(gs.teams && gs.teams[1] ? gs.teams[1].name : '')}</span>`;
     }
   }
 
@@ -1195,7 +1211,7 @@ function handleNumpadInput(val) {
     return;
   }
   if (val === 'undo') {
-    undoLastVisit();
+    showUndoConfirm();
     return;
   }
   if (val === 'confirm') {
@@ -1312,6 +1328,35 @@ function recordGameWinner(side) {
   else matchState.points.away++;
   renderStatsScreen(side);
   navigateTo('screen-stats');
+}
+
+// ── Undo confirmation popup ───────────────────────────
+function showUndoConfirm() {
+  let popup = document.getElementById('undo-popup');
+  if (!popup) {
+    popup = document.createElement('div');
+    popup.id        = 'undo-popup';
+    popup.className = 'undo-popup-overlay';
+    popup.innerHTML =
+      `<div class="undo-popup-box">` +
+      `<div class="undo-popup-title">Undo last score?</div>` +
+      `<div class="undo-popup-btns">` +
+      `<button class="undo-popup-yes" id="undo-yes">Yes, Undo</button>` +
+      `<button class="undo-popup-no"  id="undo-no">Cancel</button>` +
+      `</div></div>`;
+    document.body.appendChild(popup);
+    document.getElementById('undo-yes').addEventListener('click', () => {
+      hideUndoConfirm(); undoLastVisit();
+    });
+    document.getElementById('undo-no').addEventListener('click', hideUndoConfirm);
+    popup.addEventListener('click', e => { if (e.target === popup) hideUndoConfirm(); });
+  }
+  popup.style.display = 'flex';
+}
+
+function hideUndoConfirm() {
+  const popup = document.getElementById('undo-popup');
+  if (popup) popup.style.display = 'none';
 }
 
 // ── Undo last visit ───────────────────────────────────
@@ -2263,14 +2308,22 @@ function updateCheckoutHints() {
           `<span style="font-size:7px;color:var(--text-muted);letter-spacing:1px;` +
           `text-transform:uppercase;font-family:Arial,sans-serif;">LEGS</span></span>`
         : '';
+      const cp = gs.players[gs.currentPlayerIndex];
       bar.innerHTML =
-        `<span style="flex:1;display:flex;align-items:center;padding:0 12px;font-size:13px;` +
-        `font-weight:700;color:var(--accent);font-family:Arial,sans-serif;">` +
-        `&#127985;&nbsp;Training</span>` +
-        legsCenter +
-        `<span style="display:flex;align-items:center;gap:8px;padding:0 10px;flex-shrink:0;">` +
+        `<div id="tr-bar-left" class="sc-top-left">` +
+        `<span class="sc-top-player${cp && cp.side === 't0' ? ' sc-top-player-active' : ''}">` +
+        escHtml(gs.teams && gs.teams[0] ? gs.teams[0].name : '') +
+        `</span></div>` +
+        `<div class="sc-top-center" style="width:auto;flex-shrink:0;padding:2px 8px;gap:3px;">` +
+        (multiLeg ? `<span id="tr-legs-display" style="font-size:11px;font-weight:900;` +
+          `color:var(--accent);font-family:'Arial Black',Arial,sans-serif;line-height:1;">` +
+          (gs.teams || []).map(t => gs.legsWon[t.side] || 0).join('–') + `</span>` : '') +
         `<button id="tr-checkout-toggle" class="tr-checkout-toggle${checkoutToggle ? ' active' : ''}">` +
-        `&#10003; Checkout</button></span>`;
+        `&#10003; Checkout</button></div>` +
+        `<div id="tr-bar-right" class="sc-top-right">` +
+        `<span class="sc-top-player${cp && cp.side === 't1' ? ' sc-top-player-active' : ''}">` +
+        escHtml(gs.teams && gs.teams[1] ? gs.teams[1].name : '') +
+        `</span></div>`;
       const togBtn = document.getElementById('tr-checkout-toggle');
       if (togBtn) {
         togBtn.addEventListener('click', () => {
