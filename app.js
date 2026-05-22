@@ -819,6 +819,7 @@ function renderScoringScreen() {
     <div class="sc-numpad-area">
       <div class="sc-input-row">
         <div class="sc-input-label" id="sc-input-label">Enter score</div>
+        <button class="sc-stats-btn" id="sc-stats-btn" aria-label="Live stats">&#128202;</button>
         <div class="sc-input-val" id="sc-input-val">&mdash;</div>
       </div>
       <div class="sc-action-row">
@@ -849,6 +850,9 @@ function renderScoringScreen() {
   scr.querySelectorAll('.sc-action-row [data-sc-val]').forEach(btn => {
     btn.addEventListener('click', () => handleNumpadInput(btn.dataset.scVal));
   });
+  // Wire live stats button
+  const statsBtn = document.getElementById('sc-stats-btn');
+  if (statsBtn) statsBtn.addEventListener('click', showLiveStatsPopup);
   renderScoringUI();
 }
 
@@ -2675,14 +2679,18 @@ function isMatchActive() {
 
 // ── Persist match snapshot to localStorage ────────────
 function saveActiveMatch() {
-  const active = document.querySelector('.screen.active');
-  const savedScreen = (active && active.id === 'screen-scoring')
-    ? 'screen-scoring' : 'screen-game-setup';
+  const active   = document.querySelector('.screen.active');
+  const activeId = active ? active.id : '';
+  let savedScreen;
+  if (activeId === 'screen-scoring') savedScreen = 'screen-scoring';
+  else if (activeId === 'screen-stats') savedScreen = 'screen-stats';
+  else savedScreen = 'screen-game-setup';
   const data = {
-    matchState:  JSON.parse(JSON.stringify(matchState)),
+    matchState: JSON.parse(JSON.stringify(matchState)),
     savedScreen,
   };
-  if (savedScreen === 'screen-scoring') {
+  // Save gameState for screens that need player visit data on restore
+  if (activeId === 'screen-scoring' || activeId === 'screen-stats') {
     data.gameState = {
       format:             gameState.format,
       startingScore:      gameState.startingScore,
@@ -2707,14 +2715,18 @@ function resumeActiveMatch() {
   try { data = JSON.parse(localStorage.getItem(ACTIVE_MATCH_KEY) || 'null'); } catch(e) {}
   if (!data) return;
   Object.assign(matchState, data.matchState);
-  if (data.savedScreen === 'screen-scoring' && data.gameState) {
+  if (data.savedScreen === 'screen-stats' && data.gameState) {
+    // Restore stats screen for the last completed game
     Object.assign(gameState, data.gameState);
     gameState.flashTimer = null;
+    const lastGame = matchState.games[matchState.currentGame - 1];
+    const winner   = lastGame ? lastGame.winner : 'home';
+    renderStatsScreen(winner);
     screenStack.length = 0;
-    showScreen('screen-scoring');
-    renderScoringScreen();
-    renderScoringUI();
+    showScreen('screen-stats');
   } else {
+    // For screen-scoring or screen-game-setup: return to game assignment.
+    // matchState.currentGame is already restored so renderGameSetup shows the right game.
     phdSelected = [];
     renderGameSetup();
     screenStack.length = 0;
@@ -2829,41 +2841,88 @@ function hideAbandonConfirm() {
   if (p) p.style.display = 'none';
 }
 
-// ── Finish match confirmation popup ───────────────────
-function showFinishMatchPopup() {
-  const home = escHtml(matchState.homeTeam || 'PHD');
-  const away = escHtml(matchState.awayTeam || 'Opponents');
-  const hp   = matchState.points.home;
-  const ap   = matchState.points.away;
-  let popup = document.getElementById('finish-match-popup');
+// ── End match popup (early finish or after game 9) ────
+function showEndMatchPopup() {
+  const home    = escHtml(matchState.homeTeam || 'PHD');
+  const away    = escHtml(matchState.awayTeam || 'Opponents');
+  const hp      = matchState.points.home;
+  const ap      = matchState.points.away;
+  const isEarly = !(matchState.currentGame === 9 &&
+                    matchState.games[8] && matchState.games[8].winner);
+  let popup = document.getElementById('end-match-popup');
   if (!popup) {
     popup = document.createElement('div');
-    popup.id = 'finish-match-popup';
+    popup.id = 'end-match-popup';
     popup.className = 'undo-popup-overlay';
     popup.innerHTML =
       `<div class="undo-popup-box">` +
-      `<div class="undo-popup-title" id="fmp-title"></div>` +
-      `<div class="undo-popup-btns">` +
-      `<button class="undo-popup-yes" id="fmp-confirm">Confirm</button>` +
-      `<button class="undo-popup-no"  id="fmp-cancel">Cancel</button>` +
+      `<div class="undo-popup-title" id="emp-title"></div>` +
+      `<div class="undo-popup-btns" style="flex-direction:column;gap:8px;">` +
+      `<button id="emp-save" style="min-height:50px;background:var(--accent);color:#fff;` +
+        `border:none;border-radius:9px;font-size:0.95rem;font-weight:700;cursor:pointer;` +
+        `font-family:Arial,sans-serif;-webkit-tap-highlight-color:transparent;">` +
+      `&#128190; Save &amp; End</button>` +
+      `<button id="emp-abandon" style="min-height:50px;background:var(--danger);color:#fff;` +
+        `border:none;border-radius:9px;font-size:0.95rem;font-weight:700;cursor:pointer;` +
+        `font-family:Arial,sans-serif;-webkit-tap-highlight-color:transparent;">` +
+      `Abandon</button>` +
+      `<button id="emp-cancel" style="min-height:50px;background:#2a2a2a;color:#bbb;` +
+        `border:1px solid #555;border-radius:9px;font-size:0.95rem;font-weight:700;cursor:pointer;` +
+        `font-family:Arial,sans-serif;-webkit-tap-highlight-color:transparent;">` +
+      `Cancel</button>` +
       `</div></div>`;
     document.body.appendChild(popup);
-    document.getElementById('fmp-confirm').addEventListener('click', () => {
-      hideFinishMatchPopup();
+    document.getElementById('emp-save').addEventListener('click', () => {
+      hideEndMatchPopup();
       saveMatchToHistory();
       try { localStorage.removeItem(ACTIVE_MATCH_KEY); } catch(e) {}
       screenStack.length = 0;
       showScreen('screen-home');
     });
-    document.getElementById('fmp-cancel').addEventListener('click', hideFinishMatchPopup);
-    popup.addEventListener('click', e => { if (e.target === popup) hideFinishMatchPopup(); });
+    document.getElementById('emp-abandon').addEventListener('click', () => {
+      hideEndMatchPopup();
+      showEndAbandonConfirm();
+    });
+    document.getElementById('emp-cancel').addEventListener('click', hideEndMatchPopup);
+    popup.addEventListener('click', e => { if (e.target === popup) hideEndMatchPopup(); });
   }
-  document.getElementById('fmp-title').innerHTML =
-    `End match?<br><span style="font-size:1rem;color:var(--accent);">${home} ${hp} &ndash; ${ap} ${away}</span>`;
+  document.getElementById('emp-title').innerHTML =
+    (isEarly ? 'End match early?' : 'End match?') +
+    `<br><span style="font-size:0.9rem;color:var(--accent);">${home} ${hp} &ndash; ${ap} ${away}</span>`;
   popup.style.display = 'flex';
 }
-function hideFinishMatchPopup() {
-  const p = document.getElementById('finish-match-popup');
+function hideEndMatchPopup() {
+  const p = document.getElementById('end-match-popup');
+  if (p) p.style.display = 'none';
+}
+function showEndAbandonConfirm() {
+  let popup = document.getElementById('end-abandon-popup');
+  if (!popup) {
+    popup = document.createElement('div');
+    popup.id = 'end-abandon-popup';
+    popup.className = 'undo-popup-overlay';
+    popup.innerHTML =
+      `<div class="undo-popup-box">` +
+      `<div class="undo-popup-title">Are you sure?<br>` +
+      `<span style="font-size:0.8rem;font-weight:400;color:#888;">Match will not be saved.</span></div>` +
+      `<div class="undo-popup-btns">` +
+      `<button class="undo-popup-yes" id="ea-yes" style="background:var(--danger);">Abandon</button>` +
+      `<button class="undo-popup-no"  id="ea-no">Cancel</button>` +
+      `</div></div>`;
+    document.body.appendChild(popup);
+    document.getElementById('ea-yes').addEventListener('click', () => {
+      hideEndAbandonConfirm();
+      try { localStorage.removeItem(ACTIVE_MATCH_KEY); } catch(e) {}
+      screenStack.length = 0;
+      showScreen('screen-home');
+    });
+    document.getElementById('ea-no').addEventListener('click', hideEndAbandonConfirm);
+    popup.addEventListener('click', e => { if (e.target === popup) hideEndAbandonConfirm(); });
+  }
+  popup.style.display = 'flex';
+}
+function hideEndAbandonConfirm() {
+  const p = document.getElementById('end-abandon-popup');
   if (p) p.style.display = 'none';
 }
 
@@ -2902,18 +2961,115 @@ function hideFinishMatchPopup() {
   const newBtn = btn.cloneNode(true);
   btn.parentNode.replaceChild(newBtn, btn);
   newBtn.addEventListener('click', () => {
-    if (gameState.mode !== 'training' && matchState.currentGame === 9 &&
-        matchState.games[8] && matchState.games[8].winner) {
-      showFinishMatchPopup();
-    } else {
+    if (gameState.mode === 'training') {
+      // Training: just go home, no match record
       screenStack.length = 0;
       showScreen('screen-home');
+      return;
     }
+    // Match mode: always show confirmation (early or after game 9)
+    showEndMatchPopup();
   });
 }());
 
 // ── Show resume button on load if a saved match exists ─
 renderHomeResumeMatch();
+
+/* ══════════════════════════════════════════════════════
+   LIVE STATS POPUP
+══════════════════════════════════════════════════════ */
+
+(function(){
+  const s = document.createElement('style');
+  s.textContent = [
+    // Stats button in input row
+    '.sc-stats-btn{background:none;border:none;font-size:1.25rem;cursor:pointer;padding:2px 8px;' +
+      'line-height:1;-webkit-tap-highlight-color:transparent;flex-shrink:0;opacity:0.85;}',
+    '.sc-stats-btn:active{opacity:1;}',
+    // Popup overlay + box
+    '.lstats-overlay{position:fixed;inset:0;z-index:9999;display:flex;align-items:center;' +
+      'justify-content:center;background:rgba(0,0,0,0.82);}',
+    '.lstats-box{background:#1a1a1a;border:1px solid #444;border-radius:14px;padding:22px 20px;' +
+      'min-width:280px;max-width:340px;width:90%;max-height:80vh;overflow-y:auto;' +
+      'box-shadow:0 8px 32px rgba(0,0,0,0.7);}',
+    '.lstats-title{font-size:1.05rem;font-weight:700;color:var(--accent);font-family:Arial,sans-serif;' +
+      'text-align:center;margin-bottom:16px;letter-spacing:1px;text-transform:uppercase;}',
+    '.lstats-team{font-size:0.65rem;color:var(--text-muted);letter-spacing:2px;text-transform:uppercase;' +
+      'font-family:Arial,sans-serif;margin-bottom:8px;}',
+    '.lstats-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:4px;}',
+    '.lstats-stat{background:#111;border:1px solid #2a2a2a;border-radius:8px;padding:8px 4px;text-align:center;}',
+    '.lstats-val{font-size:1.25rem;font-weight:900;color:#fff;font-family:"Arial Black",Arial,sans-serif;line-height:1;}',
+    '.lstats-lbl{font-size:0.5rem;color:#555;letter-spacing:1px;text-transform:uppercase;' +
+      'font-family:Arial,sans-serif;margin-top:4px;}',
+    '.lstats-div{border:none;border-top:1px solid #2a2a2a;margin:14px 0;}',
+    '.lstats-close{display:block;width:100%;margin-top:14px;padding:12px;background:#222;' +
+      'border:1px solid #555;border-radius:9px;color:#bbb;font-size:0.95rem;font-weight:700;' +
+      'cursor:pointer;font-family:Arial,sans-serif;-webkit-tap-highlight-color:transparent;}',
+  ].join('');
+  document.head.appendChild(s);
+}());
+
+// ── Per-side stat aggregation ─────────────────────────
+function getLiveStats() {
+  const gs = gameState;
+  const sides = gs.mode === 'training'
+    ? (gs.teams || []).map((t, i) => ({
+        name: t.name,
+        side: 't' + i,
+        rem:  gs.sideScores['t' + i],
+      }))
+    : [
+        { name: matchState.homeTeam || 'PHD',       side: 'home', rem: gs.sideScores.home },
+        { name: matchState.awayTeam || 'Opponents', side: 'away', rem: gs.sideScores.away },
+      ];
+  return sides.map(({ name, side, rem }) => {
+    const allVisits = [];
+    (gs.players || []).filter(p => p.side === side)
+      .forEach(p => (p.visits || []).forEach(v => allVisits.push(v)));
+    const scored  = allVisits.filter(v => !v.wasBust);
+    const total   = scored.reduce((s, v) => s + v.scored, 0);
+    const visits  = scored.length;
+    const avg     = visits > 0 ? (total / visits).toFixed(1) : '—';
+    const high    = visits > 0 ? Math.max(...scored.map(v => v.scored)) : '—';
+    const v80plus = scored.filter(v => v.scored >= 80).length;
+    return { name, avg, high, v80plus, rem, darts: visits * 3 };
+  });
+}
+
+// ── Live stats popup ──────────────────────────────────
+function showLiveStatsPopup() {
+  const stats = getLiveStats();
+  let popup = document.getElementById('live-stats-popup');
+  if (!popup) {
+    popup = document.createElement('div');
+    popup.id        = 'live-stats-popup';
+    popup.className = 'lstats-overlay';
+    document.body.appendChild(popup);
+    popup.addEventListener('click', e => { if (e.target === popup) hideLiveStatsPopup(); });
+  }
+  const rows = stats.map(s =>
+    `<div class="lstats-team">${escHtml(s.name)}</div>` +
+    `<div class="lstats-grid">` +
+      `<div class="lstats-stat"><div class="lstats-val">${s.avg}</div><div class="lstats-lbl">3-Dart Avg</div></div>` +
+      `<div class="lstats-stat"><div class="lstats-val">${s.high}</div><div class="lstats-lbl">Highest</div></div>` +
+      `<div class="lstats-stat"><div class="lstats-val">${s.v80plus}</div><div class="lstats-lbl">80+ Visits</div></div>` +
+      `<div class="lstats-stat"><div class="lstats-val">${s.rem}</div><div class="lstats-lbl">Remaining</div></div>` +
+      `<div class="lstats-stat"><div class="lstats-val">${s.darts}</div><div class="lstats-lbl">Darts</div></div>` +
+    `</div>`
+  ).join('<hr class="lstats-div">');
+  popup.innerHTML =
+    `<div class="lstats-box">` +
+    `<div class="lstats-title">&#128202; Live Stats</div>` +
+    rows +
+    `<button class="lstats-close" id="lstats-close-btn">Close</button>` +
+    `</div>`;
+  document.getElementById('lstats-close-btn').addEventListener('click', hideLiveStatsPopup);
+  popup.style.display = 'flex';
+}
+function hideLiveStatsPopup() {
+  const p = document.getElementById('live-stats-popup');
+  if (p) p.style.display = 'none';
+}
 
 /* ══════════════════════════════════════════════════════
    TOURNAMENT MODE
