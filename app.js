@@ -3767,17 +3767,20 @@ function startTrnGame() {
   trainingState.firstTeamIdx = 0;
   // trnPendingMatch stays set — recordGameWinner wrapper reads it to advance bracket
   initTrainingScoring();
+  // Flag must be set AFTER initTrainingScoring (which resets gameState)
+  gameState.tournamentMatch = true;
 }
 
 // ── Intercept training game end when playing for tournament ─
 (function(){
   const _prev = window.recordGameWinner;
   window.recordGameWinner = function(side) {
-    if (trnPendingMatch && gameState.mode === 'training') {
+    if (trnPendingMatch && gameState.mode === 'training' && gameState.tournamentMatch) {
       // side 't0' = p1, 't1' = p2 (per startTrnGame team order)
       const pk = (side === 't0') ? 'p1' : 'p2';
       const { ri, mi } = trnPendingMatch;
       trnPendingMatch = null;
+      gameState.tournamentMatch = false;
       pickTrnWinner(ri, mi, pk);
       navigateTo('screen-tournament-bracket');
       return;
