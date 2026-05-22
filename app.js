@@ -40,6 +40,8 @@ function showScreen(id) {
   }
   document.getElementById('btn-back').style.display =
     screenStack.length ? 'block' : 'none';
+  const btnHome = document.getElementById('btn-home');
+  if (btnHome) btnHome.style.display = (id !== 'screen-home') ? 'block' : 'none';
 }
 
 function navigateTo(id) {
@@ -63,6 +65,10 @@ document.querySelectorAll('[data-target]').forEach(btn => {
 });
 
 document.getElementById('btn-back').addEventListener('click', navigateBack);
+document.getElementById('btn-home').addEventListener('click', () => {
+  screenStack.length = 0;
+  showScreen('screen-home');
+});
 
 // ── Players — localStorage helpers ──────────────────────────
 const STORAGE_KEY = 'phd_players';
@@ -915,11 +921,11 @@ function renderScoringUI() {
     // Refresh training topbar team name highlights
     const trBarLeft = document.getElementById('tr-bar-left');
     if (trBarLeft) {
-      trBarLeft.innerHTML = `<span class="sc-top-player${cp.side === 't0' ? ' sc-top-player-active' : ''}">${escHtml(gs.teams && gs.teams[0] ? gs.teams[0].name : '')}</span>`;
+      trBarLeft.innerHTML = `<span class="sc-top-player${cp.side === 't0' ? ' sc-top-player-active' : ''}">${escHtml((gs.players || []).filter(p => p.side === 't0').map(p => p.name).join(' & '))}</span>`;
     }
     const trBarRight = document.getElementById('tr-bar-right');
     if (trBarRight) {
-      trBarRight.innerHTML = `<span class="sc-top-player${cp.side === 't1' ? ' sc-top-player-active' : ''}">${escHtml(gs.teams && gs.teams[1] ? gs.teams[1].name : '')}</span>`;
+      trBarRight.innerHTML = `<span class="sc-top-player${cp.side === 't1' ? ' sc-top-player-active' : ''}">${escHtml((gs.players || []).filter(p => p.side === 't1').map(p => p.name).join(' & '))}</span>`;
     }
   }
 
@@ -2312,7 +2318,7 @@ function updateCheckoutHints() {
       bar.innerHTML =
         `<div id="tr-bar-left" class="sc-top-left">` +
         `<span class="sc-top-player${cp && cp.side === 't0' ? ' sc-top-player-active' : ''}">` +
-        escHtml(gs.teams && gs.teams[0] ? gs.teams[0].name : '') +
+        escHtml((gs.players || []).filter(p => p.side === 't0').map(p => p.name).join(' & ')) +
         `</span></div>` +
         `<div class="sc-top-center" style="width:auto;flex-shrink:0;padding:2px 8px;gap:3px;">` +
         (multiLeg ? `<span id="tr-legs-display" style="font-size:11px;font-weight:900;` +
@@ -2322,7 +2328,7 @@ function updateCheckoutHints() {
         `&#10003; Checkout</button></div>` +
         `<div id="tr-bar-right" class="sc-top-right">` +
         `<span class="sc-top-player${cp && cp.side === 't1' ? ' sc-top-player-active' : ''}">` +
-        escHtml(gs.teams && gs.teams[1] ? gs.teams[1].name : '') +
+        escHtml((gs.players || []).filter(p => p.side === 't1').map(p => p.name).join(' & ')) +
         `</span></div>`;
       const togBtn = document.getElementById('tr-checkout-toggle');
       if (togBtn) {
