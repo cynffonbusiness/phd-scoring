@@ -1301,8 +1301,7 @@ function startNewLeg() {
 // ── Record game winner, update points, go to stats ───
 function recordGameWinner(side) {
   const game = matchState.games[matchState.currentGame - 1];
-  if (!game) return;
-  if (game.winner) return;          // guard: already recorded — prevents double-increment
+  if (!game || game.winner) return;   // strict guard — must be absolute first check
   game.winner = side;
   if (side === 'home') matchState.points.home++;
   else matchState.points.away++;
