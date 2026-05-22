@@ -683,12 +683,11 @@ renderMatchSetup();
     '.sc-input-val{font-size:26px;font-weight:800;color:#fff;min-width:60px;text-align:center;letter-spacing:2px;transition:color 0.15s;}',
     '.sc-input-val.bust-flash{color:var(--danger)!important;}',
     '.sc-input-val.leg-flash{color:var(--success)!important;}',
-    '.sc-action-row{display:grid;grid-template-columns:1fr;gap:3px;}',
-    '.sc-action-row .numpad-btn{min-height:56px;border-radius:7px;border:1px solid var(--border);background:#1a1a1a;color:#fff;font-size:1.8rem;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;-webkit-tap-highlight-color:transparent;touch-action:manipulation;}',
+    '.sc-action-row{display:grid;grid-template-columns:1fr 1fr;gap:3px;}',
+    '.sc-action-row .numpad-btn{min-height:72px;border-radius:7px;border:1px solid var(--border);background:#1a1a1a;color:#fff;font-size:1.8rem;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;-webkit-tap-highlight-color:transparent;touch-action:manipulation;}',
     '.sc-action-row .numpad-btn:active{background:#2a2a2a;}',
     '.sc-action-row .numpad-bust{background:#1a0a0a!important;border-color:var(--danger)!important;color:var(--danger)!important;}',
-    '.sc-undo-btn{background:#1a1a2a;border:1px solid #555;border-radius:7px;color:#aaa;font-size:1rem;font-weight:700;cursor:pointer;padding:5px 10px;line-height:1;-webkit-tap-highlight-color:transparent;flex-shrink:0;touch-action:manipulation;}',
-    '.sc-undo-btn:active{background:#2a2a3a;}',
+    '.sc-action-row .numpad-undo{background:#1a1a2a!important;border-color:#555!important;color:#aaa!important;}',
     '#sc-numpad{display:grid;grid-template-columns:repeat(3,1fr);gap:3px;}',
     '#sc-numpad .numpad-btn{min-height:72px;border-radius:7px;border:1px solid var(--border);background:#1a1a1a;color:#fff;font-size:1.8rem;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;-webkit-tap-highlight-color:transparent;touch-action:manipulation;}',
     '#sc-numpad .numpad-btn:active{background:#2a2a2a;}',
@@ -821,11 +820,11 @@ function renderScoringScreen() {
       <div class="sc-input-row">
         <div class="sc-input-label" id="sc-input-label">Enter score</div>
         <button class="sc-stats-btn" id="sc-stats-btn" aria-label="Live stats">&#128202;</button>
-        <button class="sc-undo-btn"  id="sc-undo-btn"  aria-label="Undo">&#8617; UNDO</button>
         <div class="sc-input-val" id="sc-input-val">&mdash;</div>
       </div>
       <div class="sc-action-row">
         <button class="numpad-btn numpad-bust" data-sc-val="bust">BUST</button>
+        <button class="numpad-btn numpad-undo" data-sc-val="undo">UNDO</button>
       </div>
       <div id="sc-numpad">
         ${[1,2,3,4,5,6,7,8,9].map(n =>
@@ -854,9 +853,6 @@ function renderScoringScreen() {
   // Wire live stats button
   const statsBtn = document.getElementById('sc-stats-btn');
   if (statsBtn) statsBtn.addEventListener('click', showLiveStatsPopup);
-  // Wire inline undo button
-  const undoBtn = document.getElementById('sc-undo-btn');
-  if (undoBtn) undoBtn.addEventListener('click', () => handleNumpadInput('undo'));
   renderScoringUI();
 }
 
