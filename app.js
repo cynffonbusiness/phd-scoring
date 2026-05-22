@@ -683,11 +683,12 @@ renderMatchSetup();
     '.sc-input-val{font-size:26px;font-weight:800;color:#fff;min-width:60px;text-align:center;letter-spacing:2px;transition:color 0.15s;}',
     '.sc-input-val.bust-flash{color:var(--danger)!important;}',
     '.sc-input-val.leg-flash{color:var(--success)!important;}',
-    '.sc-action-row{display:grid;grid-template-columns:1fr 1fr;gap:3px;}',
-    '.sc-action-row .numpad-btn{min-height:72px;border-radius:7px;border:1px solid var(--border);background:#1a1a1a;color:#fff;font-size:1.8rem;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;-webkit-tap-highlight-color:transparent;touch-action:manipulation;}',
+    '.sc-action-row{display:grid;grid-template-columns:1fr;gap:3px;}',
+    '.sc-action-row .numpad-btn{min-height:56px;border-radius:7px;border:1px solid var(--border);background:#1a1a1a;color:#fff;font-size:1.8rem;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;-webkit-tap-highlight-color:transparent;touch-action:manipulation;}',
     '.sc-action-row .numpad-btn:active{background:#2a2a2a;}',
     '.sc-action-row .numpad-bust{background:#1a0a0a!important;border-color:var(--danger)!important;color:var(--danger)!important;}',
-    '.sc-action-row .numpad-undo{background:#1a1a2a!important;border-color:#555!important;color:#aaa!important;}',
+    '.sc-undo-btn{background:#1a1a2a;border:1px solid #555;border-radius:7px;color:#aaa;font-size:1rem;font-weight:700;cursor:pointer;padding:5px 10px;line-height:1;-webkit-tap-highlight-color:transparent;flex-shrink:0;touch-action:manipulation;}',
+    '.sc-undo-btn:active{background:#2a2a3a;}',
     '#sc-numpad{display:grid;grid-template-columns:repeat(3,1fr);gap:3px;}',
     '#sc-numpad .numpad-btn{min-height:72px;border-radius:7px;border:1px solid var(--border);background:#1a1a1a;color:#fff;font-size:1.8rem;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;-webkit-tap-highlight-color:transparent;touch-action:manipulation;}',
     '#sc-numpad .numpad-btn:active{background:#2a2a2a;}',
@@ -820,11 +821,11 @@ function renderScoringScreen() {
       <div class="sc-input-row">
         <div class="sc-input-label" id="sc-input-label">Enter score</div>
         <button class="sc-stats-btn" id="sc-stats-btn" aria-label="Live stats">&#128202;</button>
+        <button class="sc-undo-btn"  id="sc-undo-btn"  aria-label="Undo">&#8617; UNDO</button>
         <div class="sc-input-val" id="sc-input-val">&mdash;</div>
       </div>
       <div class="sc-action-row">
         <button class="numpad-btn numpad-bust" data-sc-val="bust">BUST</button>
-        <button class="numpad-btn numpad-undo" data-sc-val="undo">UNDO</button>
       </div>
       <div id="sc-numpad">
         ${[1,2,3,4,5,6,7,8,9].map(n =>
@@ -853,6 +854,9 @@ function renderScoringScreen() {
   // Wire live stats button
   const statsBtn = document.getElementById('sc-stats-btn');
   if (statsBtn) statsBtn.addEventListener('click', showLiveStatsPopup);
+  // Wire inline undo button
+  const undoBtn = document.getElementById('sc-undo-btn');
+  if (undoBtn) undoBtn.addEventListener('click', () => handleNumpadInput('undo'));
   renderScoringUI();
 }
 
@@ -1535,14 +1539,14 @@ function renderStatsScreen(winningSide) {
   function sideStats(side) {
     const allVisits = [];
     gs.players.filter(p => p.side === side).forEach(p => p.visits.forEach(v => allVisits.push(v)));
-    const scored = allVisits.filter(v => !v.wasBust);
-    const total  = scored.reduce((s, v) => s + v.scored, 0);
-    const visits = scored.length;
-    const avg    = visits > 0 ? (total / visits).toFixed(1) : '—';
-    const high   = visits > 0 ? Math.max(...scored.map(v => v.scored)) : 0;
-    const c100   = scored.filter(v => v.scored >= 100 && v.scored < 180).length;
-    const c180   = scored.filter(v => v.scored === 180).length;
-    const darts  = visits * 3;
+    const visits  = allVisits.length;
+    const total   = allVisits.reduce((s, v) => s + (v.wasBust ? 0 : v.scored), 0);
+    const avg     = visits > 0 ? (total / visits).toFixed(1) : '—';
+    const nonBust = allVisits.filter(v => !v.wasBust);
+    const high    = nonBust.length > 0 ? Math.max(...nonBust.map(v => v.scored)) : 0;
+    const c100    = nonBust.filter(v => v.scored >= 100 && v.scored < 180).length;
+    const c180    = nonBust.filter(v => v.scored === 180).length;
+    const darts   = visits * 3;
     return { avg, high, c100, c180, darts };
   }
 
@@ -2371,16 +2375,17 @@ function renderTrainingStats(winningSide) {
   if (!scr) return;
 
   function playerStats(p) {
-    const scored = p.visits.filter(v => !v.wasBust);
-    const total  = scored.reduce((s, v) => s + v.scored, 0);
-    const visits = scored.length;
-    const avg    = visits > 0 ? (total / visits).toFixed(1) : '—';
-    const high   = visits > 0 ? Math.max(...scored.map(v => v.scored)) : 0;
-    const c90    = scored.filter(v => v.scored >= 90).length;
-    const c180   = scored.filter(v => v.scored === 180).length;
-    const darts  = visits * 3;
-    const lastV  = scored[scored.length - 1];
-    const checkout = (lastV && lastV.remaining === 0) ? lastV.scored : null;
+    const allVisits = p.visits;
+    const visits    = allVisits.length;
+    const total     = allVisits.reduce((s, v) => s + (v.wasBust ? 0 : v.scored), 0);
+    const avg       = visits > 0 ? (total / visits).toFixed(1) : '—';
+    const nonBust   = allVisits.filter(v => !v.wasBust);
+    const high      = nonBust.length > 0 ? Math.max(...nonBust.map(v => v.scored)) : 0;
+    const c90       = nonBust.filter(v => v.scored >= 90).length;
+    const c180      = nonBust.filter(v => v.scored === 180).length;
+    const darts     = visits * 3;
+    const lastV     = nonBust[nonBust.length - 1];
+    const checkout  = (lastV && lastV.remaining === 0) ? lastV.scored : null;
     return { avg, high, c90, c180, darts, checkout };
   }
 
@@ -2503,12 +2508,12 @@ function saveTrainingSession(winningSide) {
         name:   team.name,
         winner: team.side === winningSide,
         players: teamPlayers.map(p => {
-          const scored = p.visits.filter(v => !v.wasBust);
-          const total  = scored.reduce((s, v) => s + v.scored, 0);
+          const visits = p.visits.length;
+          const total  = p.visits.reduce((s, v) => s + (v.wasBust ? 0 : v.scored), 0);
           return {
             name:  p.name,
-            avg:   scored.length > 0 ? (total / scored.length).toFixed(1) : 0,
-            darts: scored.length * 3,
+            avg:   visits > 0 ? (total / visits).toFixed(1) : 0,
+            darts: visits * 3,
           };
         }),
       };
@@ -3026,12 +3031,12 @@ function getLiveStats() {
     const allVisits = [];
     (gs.players || []).filter(p => p.side === side)
       .forEach(p => (p.visits || []).forEach(v => allVisits.push(v)));
-    const scored  = allVisits.filter(v => !v.wasBust);
-    const total   = scored.reduce((s, v) => s + v.scored, 0);
-    const visits  = scored.length;
+    const visits  = allVisits.length;
+    const total   = allVisits.reduce((s, v) => s + (v.wasBust ? 0 : v.scored), 0);
     const avg     = visits > 0 ? (total / visits).toFixed(1) : '—';
-    const high    = visits > 0 ? Math.max(...scored.map(v => v.scored)) : '—';
-    const v80plus = scored.filter(v => v.scored >= 80).length;
+    const nonBust = allVisits.filter(v => !v.wasBust);
+    const high    = nonBust.length > 0 ? Math.max(...nonBust.map(v => v.scored)) : '—';
+    const v80plus = nonBust.filter(v => v.scored >= 80).length;
     return { name, avg, high, v80plus, rem, darts: visits * 3 };
   });
 }
@@ -3111,6 +3116,10 @@ function hideLiveStatsPopup() {
     '.trn-champ-sub{font-size:0.7rem;font-family:Arial,sans-serif;opacity:0.75;}',
     '.trn-undo-btn{display:block;width:100%;padding:5px 0;background:rgba(80,80,80,0.15);border:none;border-top:1px solid var(--border);color:#888;font-family:Arial,sans-serif;font-size:0.68rem;letter-spacing:1px;cursor:pointer;text-align:center;-webkit-tap-highlight-color:transparent;}',
     '.trn-undo-btn:active{background:rgba(80,80,80,0.35);color:#bbb;}',
+    // Tournament play-on-board format popup buttons
+    '.trn-fmt-btn{background:var(--bg-raised);border:2px solid var(--border);border-radius:8px;color:var(--text);font-family:Arial,sans-serif;font-weight:700;font-size:0.82rem;padding:10px 4px;cursor:pointer;text-align:center;min-height:44px;-webkit-tap-highlight-color:transparent;transition:background 0.1s,border-color 0.1s;}',
+    '.trn-fmt-btn.trn-fmt-sel{background:var(--accent);border-color:var(--accent);color:#fff;}',
+    '.trn-fmt-label{font-size:0.62rem;color:var(--text-muted);letter-spacing:2px;text-transform:uppercase;font-family:Arial,sans-serif;margin-bottom:8px;display:block;}',
   ].join('');
   document.head.appendChild(s);
 }());
@@ -3504,15 +3513,17 @@ function renderTournamentBracket() {
       const p1cls  = p1Tbd ? ' bp-tbd' : p1Null ? ' bp-bye' : p1Win ? ' bp-win' : (match.winner ? ' bp-out' : '');
       const p2cls  = p2Tbd ? ' bp-tbd' : p2Null ? ' bp-bye' : p2Win ? ' bp-win' : (match.winner ? ' bp-out' : '');
       // Pickable: both players are real and known, match not yet resolved, no champion yet
-      const canPick      = !ts.champion && !match.resolved && !p1Tbd && !p2Tbd && !p1Null && !p2Null;
+      const canPick        = !ts.champion && !match.resolved && !p1Tbd && !p2Tbd && !p1Null && !p2Null;
       // Undoable: user-resolved match (both sides were real players, not a BYE auto-resolve)
       const isUserResolved = match.resolved && !p1Null && !p2Null && !p1Tbd && !p2Tbd;
-      const p1attr       = canPick ? `data-pick-r="${ri}" data-pick-m="${mi}" data-pick-p="p1"` : 'disabled';
-      const p2attr       = canPick ? `data-pick-r="${ri}" data-pick-m="${mi}" data-pick-p="p2"` : 'disabled';
+      // Pickable: data attrs on the card; player buttons are enabled but don't carry pick attrs
+      const p1attr         = canPick ? '' : 'disabled';
+      const p2attr         = canPick ? '' : 'disabled';
+      const matchDataAttr  = canPick ? `data-trn-r="${ri}" data-trn-m="${mi}"` : '';
 
       html += `
         <div class="bracket-slot" style="flex:${slotFlex};">
-          <div class="bracket-match${canPick ? ' bm-active' : ''}${match.resolved ? ' bm-done' : ''}">
+          <div class="bracket-match${canPick ? ' bm-active' : ''}${match.resolved ? ' bm-done' : ''}" ${matchDataAttr}>
             <button class="bracket-player${p1cls}" ${p1attr}>${escHtml(p1Name)}</button>
             <div class="bracket-vs">vs</div>
             <button class="bracket-player${p2cls}" ${p2attr}>${escHtml(p2Name)}</button>
@@ -3535,17 +3546,18 @@ function renderTournamentBracket() {
 }
 
 function trnBracketClick(e) {
-  const pickBtn = e.target.closest('[data-pick-r]');
-  if (pickBtn) {
-    const ri = parseInt(pickBtn.dataset.pickR, 10);
-    const mi = parseInt(pickBtn.dataset.pickM, 10);
-    const pk = pickBtn.dataset.pickP;
-    pickTrnWinner(ri, mi, pk);
-    return;
-  }
+  // Undo button (check before match card — it's nested inside it)
   const undoBtn = e.target.closest('[data-trn-undo-r]');
   if (undoBtn) {
     undoTrnMatch(parseInt(undoBtn.dataset.trnUndoR, 10), parseInt(undoBtn.dataset.trnUndoM, 10));
+    return;
+  }
+  // Pickable match card → show play/enter popup
+  const matchCard = e.target.closest('[data-trn-r]');
+  if (matchCard) {
+    const ri = parseInt(matchCard.dataset.trnR, 10);
+    const mi = parseInt(matchCard.dataset.trnM, 10);
+    showTrnMatchPopup(ri, mi);
     return;
   }
   if (e.target.closest('#trn-home-btn')) {
@@ -3560,6 +3572,223 @@ function trnBracketClick(e) {
     }
   }
 }
+
+// ── Tournament match popup: Play / Enter Result / Cancel ─────
+let trnPendingMatch = null;       // { ri, mi, p1, p2 } while match is pending
+let trnPlayFormat   = { score: 501, legs: 3 }; // persists format choice between games
+
+function showTrnMatchPopup(ri, mi) {
+  const ts = tournamentState;
+  if (!ts) return;
+  const match = ts.rounds[ri] && ts.rounds[ri][mi];
+  if (!match || match.resolved) return;
+  trnPendingMatch = { ri, mi, p1: match.p1, p2: match.p2 };
+
+  let popup = document.getElementById('trn-match-popup');
+  if (!popup) {
+    popup = document.createElement('div');
+    popup.id = 'trn-match-popup';
+    popup.className = 'undo-popup-overlay';
+    document.body.appendChild(popup);
+    popup.addEventListener('click', e => { if (e.target === popup) hideTrnMatchPopup(); });
+  }
+  const { p1, p2 } = trnPendingMatch;
+  popup.innerHTML =
+    `<div class="undo-popup-box" style="max-width:300px;">` +
+    `<div style="font-size:1rem;font-weight:700;color:#fff;font-family:Arial,sans-serif;` +
+      `text-align:center;margin-bottom:4px;">${escHtml(p1)}</div>` +
+    `<div style="font-size:0.65rem;color:#555;font-family:Arial,sans-serif;` +
+      `text-align:center;letter-spacing:2px;margin-bottom:8px;">VS</div>` +
+    `<div style="font-size:1rem;font-weight:700;color:#fff;font-family:Arial,sans-serif;` +
+      `text-align:center;margin-bottom:20px;">${escHtml(p2)}</div>` +
+    `<div class="undo-popup-btns" style="flex-direction:column;gap:8px;">` +
+    `<button id="trn-play-board" style="min-height:50px;background:var(--accent);color:#fff;` +
+      `border:none;border-radius:9px;font-size:0.95rem;font-weight:700;cursor:pointer;` +
+      `font-family:Arial,sans-serif;-webkit-tap-highlight-color:transparent;">` +
+    `&#127919; Play on this board</button>` +
+    `<button id="trn-enter-result" style="min-height:50px;background:#2a2a2a;color:#bbb;` +
+      `border:1px solid #555;border-radius:9px;font-size:0.95rem;font-weight:700;cursor:pointer;` +
+      `font-family:Arial,sans-serif;-webkit-tap-highlight-color:transparent;">` +
+    `&#9998; Enter result manually</button>` +
+    `<button id="trn-match-cancel" style="min-height:44px;background:#1a1a1a;color:#555;` +
+      `border:1px solid #333;border-radius:9px;font-size:0.9rem;font-weight:700;cursor:pointer;` +
+      `font-family:Arial,sans-serif;-webkit-tap-highlight-color:transparent;">` +
+    `Cancel</button>` +
+    `</div></div>`;
+  document.getElementById('trn-play-board').addEventListener('click', () => {
+    hideTrnMatchPopup(); showTrnFormatPopup();
+  });
+  document.getElementById('trn-enter-result').addEventListener('click', () => {
+    hideTrnMatchPopup(); showTrnManualResultPopup();
+  });
+  document.getElementById('trn-match-cancel').addEventListener('click', () => {
+    hideTrnMatchPopup(); trnPendingMatch = null;
+  });
+  popup.style.display = 'flex';
+}
+function hideTrnMatchPopup() {
+  const p = document.getElementById('trn-match-popup');
+  if (p) p.style.display = 'none';
+}
+
+// ── Manual result: tap the winner ─────────────────────
+function showTrnManualResultPopup() {
+  const { ri, mi, p1, p2 } = trnPendingMatch;
+  let popup = document.getElementById('trn-result-popup');
+  if (!popup) {
+    popup = document.createElement('div');
+    popup.id = 'trn-result-popup';
+    popup.className = 'undo-popup-overlay';
+    document.body.appendChild(popup);
+    popup.addEventListener('click', e => { if (e.target === popup) hideTrnResultPopup(); });
+  }
+  popup.innerHTML =
+    `<div class="undo-popup-box" style="max-width:300px;">` +
+    `<div class="undo-popup-title">Who won?</div>` +
+    `<div class="undo-popup-btns" style="flex-direction:column;gap:8px;">` +
+    `<button id="trn-res-p1" style="min-height:56px;background:var(--bg-raised);color:var(--text);` +
+      `border:2px solid var(--border);border-radius:9px;font-size:1rem;font-weight:700;` +
+      `cursor:pointer;font-family:Arial,sans-serif;-webkit-tap-highlight-color:transparent;">` +
+    `${escHtml(p1)}</button>` +
+    `<button id="trn-res-p2" style="min-height:56px;background:var(--bg-raised);color:var(--text);` +
+      `border:2px solid var(--border);border-radius:9px;font-size:1rem;font-weight:700;` +
+      `cursor:pointer;font-family:Arial,sans-serif;-webkit-tap-highlight-color:transparent;">` +
+    `${escHtml(p2)}</button>` +
+    `<button id="trn-res-cancel" style="min-height:44px;background:#1a1a1a;color:#555;` +
+      `border:1px solid #333;border-radius:9px;font-size:0.85rem;cursor:pointer;` +
+      `font-family:Arial,sans-serif;-webkit-tap-highlight-color:transparent;">` +
+    `Cancel</button>` +
+    `</div></div>`;
+  document.getElementById('trn-res-p1').addEventListener('click', () => {
+    hideTrnResultPopup(); pickTrnWinner(ri, mi, 'p1'); trnPendingMatch = null;
+  });
+  document.getElementById('trn-res-p2').addEventListener('click', () => {
+    hideTrnResultPopup(); pickTrnWinner(ri, mi, 'p2'); trnPendingMatch = null;
+  });
+  document.getElementById('trn-res-cancel').addEventListener('click', () => {
+    hideTrnResultPopup(); trnPendingMatch = null;
+  });
+  popup.style.display = 'flex';
+}
+function hideTrnResultPopup() {
+  const p = document.getElementById('trn-result-popup');
+  if (p) p.style.display = 'none';
+}
+
+// ── Format picker: score + best-of legs ───────────────
+function showTrnFormatPopup() {
+  let popup = document.getElementById('trn-format-popup');
+  if (!popup) {
+    popup = document.createElement('div');
+    popup.id = 'trn-format-popup';
+    popup.className = 'undo-popup-overlay';
+    document.body.appendChild(popup);
+    popup.addEventListener('click', e => { if (e.target === popup) hideTrnFormatPopup(); });
+  }
+
+  function scoreSelected(s) { return trnPlayFormat.score === s ? ' trn-fmt-sel' : ''; }
+  function legsSelected(l)  { return trnPlayFormat.legs  === l ? ' trn-fmt-sel' : ''; }
+  const isCustom = trnPlayFormat.score !== 301 && trnPlayFormat.score !== 501;
+
+  popup.innerHTML =
+    `<div class="undo-popup-box" style="max-width:320px;width:92%;">` +
+    `<div class="undo-popup-title">Game Format</div>` +
+    `<span class="trn-fmt-label">STARTING SCORE</span>` +
+    `<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:14px;" id="trn-score-grid">` +
+    `<button class="trn-fmt-btn${scoreSelected(301)}" data-trn-score="301">301</button>` +
+    `<button class="trn-fmt-btn${scoreSelected(501)}" data-trn-score="501">501</button>` +
+    `<button class="trn-fmt-btn${isCustom ? ' trn-fmt-sel' : ''}" data-trn-score="custom">` +
+      `${isCustom ? trnPlayFormat.score : 'Custom'}</button>` +
+    `</div>` +
+    `<span class="trn-fmt-label">BEST OF</span>` +
+    `<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:18px;">` +
+    `<button class="trn-fmt-btn${legsSelected(1)}" data-trn-legs="1">1 Leg</button>` +
+    `<button class="trn-fmt-btn${legsSelected(3)}" data-trn-legs="3">Best of 3</button>` +
+    `<button class="trn-fmt-btn${legsSelected(5)}" data-trn-legs="5">Best of 5</button>` +
+    `</div>` +
+    `<div style="display:flex;gap:8px;">` +
+    `<button id="trn-fmt-start" style="flex:1;min-height:50px;background:var(--accent);color:#fff;` +
+      `border:none;border-radius:9px;font-size:0.95rem;font-weight:700;cursor:pointer;` +
+      `font-family:Arial,sans-serif;-webkit-tap-highlight-color:transparent;">Start Game</button>` +
+    `<button id="trn-fmt-cancel" style="min-height:50px;padding:0 16px;background:#2a2a2a;` +
+      `color:#bbb;border:1px solid #555;border-radius:9px;font-size:0.9rem;font-weight:700;` +
+      `cursor:pointer;font-family:Arial,sans-serif;-webkit-tap-highlight-color:transparent;">Cancel</button>` +
+    `</div></div>`;
+
+  popup.querySelectorAll('[data-trn-score]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      if (btn.dataset.trnScore === 'custom') {
+        const raw = prompt('Enter starting score (101–1001):');
+        const val = parseInt(raw, 10);
+        if (!isNaN(val) && val >= 101 && val <= 1001) {
+          trnPlayFormat.score = val;
+          btn.textContent = val;
+        }
+      } else {
+        trnPlayFormat.score = parseInt(btn.dataset.trnScore, 10);
+      }
+      popup.querySelectorAll('[data-trn-score]').forEach(b => {
+        const isThisCustom = trnPlayFormat.score !== 301 && trnPlayFormat.score !== 501;
+        b.classList.toggle('trn-fmt-sel',
+          (b.dataset.trnScore !== 'custom' && parseInt(b.dataset.trnScore, 10) === trnPlayFormat.score) ||
+          (b.dataset.trnScore === 'custom' && isThisCustom)
+        );
+        if (b.dataset.trnScore === 'custom' && isThisCustom) b.textContent = trnPlayFormat.score;
+      });
+    });
+  });
+  popup.querySelectorAll('[data-trn-legs]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      trnPlayFormat.legs = parseInt(btn.dataset.trnLegs, 10);
+      popup.querySelectorAll('[data-trn-legs]').forEach(b =>
+        b.classList.toggle('trn-fmt-sel', parseInt(b.dataset.trnLegs, 10) === trnPlayFormat.legs)
+      );
+    });
+  });
+  document.getElementById('trn-fmt-start').addEventListener('click', () => {
+    hideTrnFormatPopup(); startTrnGame();
+  });
+  document.getElementById('trn-fmt-cancel').addEventListener('click', () => {
+    hideTrnFormatPopup(); trnPendingMatch = null;
+  });
+  popup.style.display = 'flex';
+}
+function hideTrnFormatPopup() {
+  const p = document.getElementById('trn-format-popup');
+  if (p) p.style.display = 'none';
+}
+
+// ── Launch training scoring engine for a tournament match ─
+function startTrnGame() {
+  const { p1, p2 } = trnPendingMatch;
+  trainingState.startingScore = trnPlayFormat.score;
+  trainingState.legs          = trnPlayFormat.legs;
+  trainingState.legFormat     = 'bestof';
+  trainingState.teams         = [
+    { name: p1, players: [p1] },
+    { name: p2, players: [p2] },
+  ];
+  trainingState.firstTeamIdx = 0;
+  // trnPendingMatch stays set — recordGameWinner wrapper reads it to advance bracket
+  initTrainingScoring();
+}
+
+// ── Intercept training game end when playing for tournament ─
+(function(){
+  const _prev = window.recordGameWinner;
+  window.recordGameWinner = function(side) {
+    if (trnPendingMatch && gameState.mode === 'training') {
+      // side 't0' = p1, 't1' = p2 (per startTrnGame team order)
+      const pk = (side === 't0') ? 'p1' : 'p2';
+      const { ri, mi } = trnPendingMatch;
+      trnPendingMatch = null;
+      pickTrnWinner(ri, mi, pk);
+      navigateTo('screen-tournament-bracket');
+      return;
+    }
+    _prev(side);
+  };
+}());
 
 // ── Initial renders (direct calls, no navigateTo involved) ───
 renderTrainingSetup();
