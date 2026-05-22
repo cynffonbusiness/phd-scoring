@@ -887,6 +887,11 @@ function renderScoringUI() {
       panelEl.classList.toggle('active-turn', cp.side === side);
       const remEl   = document.getElementById(`sc-rem-t${i}`);
       if (remEl) remEl.textContent = gs.sideScores[side];
+      const chEl    = document.getElementById(`sc-checkout-t${i}`);
+      if (chEl) {
+        const rem = gs.sideScores[side];
+        chEl.textContent = (checkoutToggle && rem >= 2 && rem <= 170) ? (CHECKOUTS[rem] || '') : '';
+      }
       const namesEl = document.getElementById(`sc-names-t${i}`);
       if (namesEl) {
         namesEl.innerHTML = gs.players
@@ -1614,6 +1619,10 @@ const TRAINING_HISTORY_KEY = 'phd_training_history';
     // 3-4 team training: table-dominant layout — same proportions as 2-team (override old compact overrides)
     '#screen-scoring.sc-multi-training .sc-table-wrap{flex:1!important;max-height:none!important;min-height:0!important;}',
     '#screen-scoring.sc-multi-training .sc-train-bar{flex:none!important;flex-shrink:0!important;height:120px!important;}',
+    // Checkout suggestion
+    '.tr-checkout-hint{font-size:11px;font-weight:700;color:var(--accent);font-family:Arial,sans-serif;text-align:center;min-height:14px;line-height:1.3;letter-spacing:0.5px;padding:1px 0;}',
+    '.tr-checkout-toggle{background:#1a1a1a;border:1px solid #555;border-radius:6px;color:#888;font-size:11px;font-weight:700;padding:4px 10px;cursor:pointer;font-family:Arial,sans-serif;-webkit-tap-highlight-color:transparent;letter-spacing:0.5px;white-space:nowrap;flex-shrink:0;}',
+    '.tr-checkout-toggle.active{border-color:var(--accent);color:var(--accent);}',
   ].join('');
   document.head.appendChild(s);
 }());
@@ -2166,6 +2175,64 @@ function advanceTurnTraining() {
   };
 }());
 
+// ── Checkout suggestion table (all valid finishes 2–170) ─────────────────────
+const CHECKOUTS = {
+  // Singles + doubles (2–40)
+  2:'D1', 3:'1 D1', 4:'D2', 5:'1 D2', 6:'D3', 7:'3 D2', 8:'D4', 9:'1 D4',
+  10:'D5', 11:'3 D4', 12:'D6', 13:'5 D4', 14:'D7', 15:'7 D4', 16:'D8',
+  17:'1 D8', 18:'D9', 19:'3 D8', 20:'D10', 21:'1 D10', 22:'D11', 23:'3 D10',
+  24:'D12', 25:'1 D12', 26:'D13', 27:'3 D12', 28:'D14', 29:'1 D14', 30:'D15',
+  31:'3 D14', 32:'D16', 33:'1 D16', 34:'D17', 35:'3 D16', 36:'D18', 37:'5 D16',
+  38:'D19', 39:'3 D18', 40:'D20',
+  // Single + D20 (41–60); 50 = Bull
+  41:'1 D20', 42:'2 D20', 43:'3 D20', 44:'4 D20', 45:'5 D20',
+  46:'6 D20', 47:'7 D20', 48:'8 D20', 49:'9 D20', 50:'Bull',
+  51:'11 D20', 52:'12 D20', 53:'13 D20', 54:'14 D20', 55:'15 D20',
+  56:'16 D20', 57:'17 D20', 58:'18 D20', 59:'19 D20', 60:'20 D20',
+  // Treble + double (61–100)
+  61:'T15 D8', 62:'T10 D16', 63:'T13 D12', 64:'T16 D8', 65:'T15 D10',
+  66:'T10 D18', 67:'T9 D20',  68:'T16 D10', 69:'T19 D6',  70:'T10 D20',
+  71:'T13 D16', 72:'T16 D12', 73:'T19 D8',  74:'T14 D16', 75:'T17 D12',
+  76:'T20 D8',  77:'T19 D10', 78:'T18 D12', 79:'T13 D20', 80:'T20 D10',
+  81:'T19 D12', 82:'T14 D20', 83:'T17 D16', 84:'T20 D12', 85:'T15 D20',
+  86:'T18 D16', 87:'T17 D18', 88:'T16 D20', 89:'T19 D16', 90:'T20 D15',
+  91:'T17 D20', 92:'T20 D16', 93:'T19 D18', 94:'T18 D20', 95:'T19 D19',
+  96:'T20 D18', 97:'T19 D20', 98:'T20 D19', 99:'T20 1 D19', 100:'T20 D20',
+  // Bull combos (101–110)
+  101:'T17 Bull', 102:'T20 2 D20', 103:'T20 3 D20', 104:'T18 Bull',
+  105:'T20 5 D20', 106:'T20 6 D20', 107:'T19 Bull', 108:'T20 8 D20',
+  109:'T20 9 D20', 110:'T20 Bull',
+  // T20 + single + D20 (111–120)
+  111:'T20 11 D20', 112:'T20 12 D20', 113:'T20 13 D20', 114:'T20 14 D20',
+  115:'T20 15 D20', 116:'T20 16 D20', 117:'T20 17 D20', 118:'T20 18 D20',
+  119:'T20 19 D20', 120:'T20 20 D20',
+  // Treble + treble + double (121–170; 159/162/163/165/166/168/169 omitted — impossible)
+  121:'T20 T11 D14', 122:'T18 T18 D7',  123:'T20 T13 D12', 124:'T20 T16 D8',
+  125:'T20 T15 D10', 126:'T19 T19 D6',  127:'T20 T17 D8',  128:'T20 T16 D10',
+  129:'T19 T16 D12', 130:'T20 T18 D8',  131:'T20 T13 D16', 132:'T20 T16 D12',
+  133:'T20 T19 D8',  134:'T20 T14 D16', 135:'T20 T17 D12', 136:'T20 T20 D8',
+  137:'T20 T19 D10', 138:'T20 T18 D12', 139:'T20 T13 D20', 140:'T20 T16 D16',
+  141:'T20 T19 D12', 142:'T20 T18 D14', 143:'T20 T17 D16', 144:'T20 T20 D12',
+  145:'T20 T19 D14', 146:'T20 T18 D16', 147:'T20 T17 D18', 148:'T20 T16 D20',
+  149:'T20 T19 D16', 150:'T20 T18 D18', 151:'T20 T17 D20', 152:'T20 T20 D16',
+  153:'T20 T19 D18', 154:'T20 T18 D20', 155:'T20 T19 D19', 156:'T20 T20 D18',
+  157:'T20 T19 D20', 158:'T20 T20 D19', 160:'T20 T20 D20',
+  161:'T20 T17 Bull', 164:'T20 T18 Bull', 167:'T20 T19 Bull', 170:'T20 T20 Bull',
+};
+
+let checkoutToggle = false;
+
+function updateCheckoutHints() {
+  const gs = gameState;
+  if (gs.mode !== 'training') return;
+  (gs.teams || []).forEach((team, i) => {
+    const chEl = document.getElementById('sc-checkout-t' + i);
+    if (!chEl) return;
+    const rem = gs.sideScores['t' + i];
+    chEl.textContent = (checkoutToggle && rem >= 2 && rem <= 170) ? (CHECKOUTS[rem] || '') : '';
+  });
+}
+
 // ── Wrap renderScoringScreen: replace 2-panel bar with N-team bar in training ─
 (function(){
   const _orig = renderScoringScreen;
@@ -2201,9 +2268,17 @@ function advanceTurnTraining() {
         `font-weight:700;color:var(--accent);font-family:Arial,sans-serif;">` +
         `&#127985;&nbsp;Training</span>` +
         legsCenter +
-        `<span style="flex:1;display:flex;align-items:center;justify-content:flex-end;` +
-        `padding:0 12px;font-size:10px;color:var(--text-muted);font-family:Arial,sans-serif;">` +
-        `${gs.startingScore} &bull; ${escHtml(fmtLabel)}</span>`;
+        `<span style="display:flex;align-items:center;gap:8px;padding:0 10px;flex-shrink:0;">` +
+        `<button id="tr-checkout-toggle" class="tr-checkout-toggle${checkoutToggle ? ' active' : ''}">` +
+        `&#10003; Checkout</button></span>`;
+      const togBtn = document.getElementById('tr-checkout-toggle');
+      if (togBtn) {
+        togBtn.addEventListener('click', () => {
+          checkoutToggle = !checkoutToggle;
+          togBtn.classList.toggle('active', checkoutToggle);
+          updateCheckoutHints();
+        });
+      }
     }
 
     // Replace fixed 2-panel score bar with N-panel training bar
@@ -2215,9 +2290,11 @@ function advanceTurnTraining() {
         `<div class="sc-train-panel" id="sc-panel-t${i}">
            <div class="score-team">${escHtml(team.name)}</div>
            <div class="score-remaining" id="sc-rem-t${i}">${gs.sideScores['t' + i]}</div>
+           <div class="tr-checkout-hint" id="sc-checkout-t${i}"></div>
            <div class="score-players" id="sc-names-t${i}"></div>
          </div>`
       ).join('');
+      updateCheckoutHints();
     }
   };
 }());
