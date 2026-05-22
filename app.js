@@ -1598,7 +1598,7 @@ const TRAINING_HISTORY_KEY = 'phd_training_history';
     '.sc-train-panel:last-child{border-right:none;}',
     '.sc-train-panel.active-turn{background:rgba(232,82,10,0.08);border-bottom:3px solid var(--accent);}',
     '.sc-train-panel .score-team{font-size:0.7rem;color:var(--text-muted);letter-spacing:1px;text-transform:uppercase;font-family:Arial,sans-serif;text-align:center;word-break:break-word;max-width:100%;flex-shrink:0;}',
-    '.sc-train-panel .score-remaining{flex:1;display:flex;align-items:center;justify-content:center;font-size:min(3.5rem,18vw);font-weight:900;color:var(--text);line-height:1;text-align:center;}',
+    '.sc-train-panel .score-remaining{flex:1;display:flex;align-items:center;justify-content:center;font-size:min(5rem,22vw);font-weight:900;color:var(--text);line-height:1;text-align:center;}',
     '.sc-train-panel.active-turn .score-remaining{color:var(--accent);}',
     '.sc-train-panel .score-players{font-size:0.7rem;text-align:center;color:var(--text-dim);line-height:1.4;min-height:14px;max-width:100%;overflow:hidden;flex-shrink:0;}',
     '.sc-train-panel .sc-recent{font-size:10px;color:var(--text-muted);text-align:center;margin-top:2px;min-height:12px;}',
