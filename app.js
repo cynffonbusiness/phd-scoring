@@ -42,11 +42,13 @@ function showScreen(id) {
     screenStack.length ? 'block' : 'none';
   const btnHome = document.getElementById('btn-home');
   if (btnHome) btnHome.style.display = (id !== 'screen-home') ? 'block' : 'none';
+  if (id === 'screen-home') { try { renderHomeResumeMatch(); } catch(e) {} }
 }
 
 function navigateTo(id) {
   console.trace('[navigateTo] → ' + id);
   const active = document.querySelector('.screen.active');
+  screenStack.length = 0;          // back always goes exactly one step
   if (active) screenStack.push(active.id);
   showScreen(id);
 }
@@ -2655,6 +2657,263 @@ function saveMatchToHistory() {
     }
   });
 }());
+
+/* ══════════════════════════════════════════════════════
+   MATCH RESUME / LEAVE / FINISH
+══════════════════════════════════════════════════════ */
+
+const ACTIVE_MATCH_KEY = 'phd_active_match';
+
+// ── Is a scorable match currently in progress? ────────
+function isMatchActive() {
+  if (gameState.mode === 'training') return false;
+  if (matchState.currentGame < 1 || matchState.currentGame > 9) return false;
+  const active = document.querySelector('.screen.active');
+  const matchScreens = ['screen-game-setup', 'screen-scoring', 'screen-stats'];
+  return !!(active && matchScreens.includes(active.id));
+}
+
+// ── Persist match snapshot to localStorage ────────────
+function saveActiveMatch() {
+  const active = document.querySelector('.screen.active');
+  const savedScreen = (active && active.id === 'screen-scoring')
+    ? 'screen-scoring' : 'screen-game-setup';
+  const data = {
+    matchState:  JSON.parse(JSON.stringify(matchState)),
+    savedScreen,
+  };
+  if (savedScreen === 'screen-scoring') {
+    data.gameState = {
+      format:             gameState.format,
+      startingScore:      gameState.startingScore,
+      whoThrowsFirst:     gameState.whoThrowsFirst,
+      sideScores:         Object.assign({}, gameState.sideScores),
+      legsWon:            Object.assign({}, gameState.legsWon),
+      currentLeg:         gameState.currentLeg,
+      visitSeq:           gameState.visitSeq,
+      currentInput:       '',
+      bustActive:         false,
+      players:            JSON.parse(JSON.stringify(gameState.players || [])),
+      currentPlayerIndex: gameState.currentPlayerIndex || 0,
+      mode:               gameState.mode,
+    };
+  }
+  try { localStorage.setItem(ACTIVE_MATCH_KEY, JSON.stringify(data)); } catch(e) {}
+}
+
+// ── Restore saved match and navigate to correct screen ─
+function resumeActiveMatch() {
+  let data;
+  try { data = JSON.parse(localStorage.getItem(ACTIVE_MATCH_KEY) || 'null'); } catch(e) {}
+  if (!data) return;
+  Object.assign(matchState, data.matchState);
+  if (data.savedScreen === 'screen-scoring' && data.gameState) {
+    Object.assign(gameState, data.gameState);
+    gameState.flashTimer = null;
+    screenStack.length = 0;
+    showScreen('screen-scoring');
+    renderScoringScreen();
+    renderScoringUI();
+  } else {
+    phdSelected = [];
+    renderGameSetup();
+    screenStack.length = 0;
+    showScreen('screen-game-setup');
+  }
+}
+
+// ── Home-screen resume-match widget ──────────────────
+function renderHomeResumeMatch() {
+  const hasMatch = !!localStorage.getItem(ACTIVE_MATCH_KEY);
+  let div = document.getElementById('home-resume-match');
+  if (!hasMatch) {
+    if (div) div.style.display = 'none';
+    return;
+  }
+  if (!div) {
+    div = document.createElement('div');
+    div.id = 'home-resume-match';
+    div.style.cssText = 'display:flex;align-items:center;gap:8px;width:100%;';
+    div.innerHTML =
+      `<button id="btn-resume-match" class="btn btn-ghost" style="flex:1;min-height:50px;gap:8px;">` +
+      `&#9654; Resume Match in Progress</button>` +
+      `<button id="btn-delete-resume" class="btn btn-danger btn-sm"` +
+      ` style="width:auto;min-height:50px;padding:8px 16px;flex-shrink:0;">&#10005;</button>`;
+    const ref = document.getElementById('btn-resume-tournament');
+    if (ref) ref.insertAdjacentElement('afterend', div);
+    else document.getElementById('screen-home').appendChild(div);
+    document.getElementById('btn-resume-match').addEventListener('click', resumeActiveMatch);
+    document.getElementById('btn-delete-resume').addEventListener('click', () => {
+      localStorage.removeItem(ACTIVE_MATCH_KEY);
+      renderHomeResumeMatch();
+    });
+  } else {
+    div.style.display = 'flex';
+  }
+}
+
+// ── Leave-match popup: Save & Leave / Abandon / Cancel ─
+function showLeaveMatchPopup() {
+  let popup = document.getElementById('leave-match-popup');
+  if (!popup) {
+    popup = document.createElement('div');
+    popup.id = 'leave-match-popup';
+    popup.className = 'undo-popup-overlay';
+    popup.innerHTML =
+      `<div class="undo-popup-box">` +
+      `<div class="undo-popup-title">Leave this match?</div>` +
+      `<div class="undo-popup-btns" style="flex-direction:column;gap:8px;">` +
+      `<button id="lmp-save"    style="min-height:50px;background:var(--accent);color:#fff;` +
+        `border:none;border-radius:9px;font-size:0.95rem;font-weight:700;cursor:pointer;` +
+        `font-family:Arial,sans-serif;-webkit-tap-highlight-color:transparent;">` +
+      `&#128190; Save &amp; Leave</button>` +
+      `<button id="lmp-abandon" style="min-height:50px;background:var(--danger);color:#fff;` +
+        `border:none;border-radius:9px;font-size:0.95rem;font-weight:700;cursor:pointer;` +
+        `font-family:Arial,sans-serif;-webkit-tap-highlight-color:transparent;">` +
+      `Abandon Match</button>` +
+      `<button id="lmp-cancel"  style="min-height:50px;background:#2a2a2a;color:#bbb;` +
+        `border:1px solid #555;border-radius:9px;font-size:0.95rem;font-weight:700;cursor:pointer;` +
+        `font-family:Arial,sans-serif;-webkit-tap-highlight-color:transparent;">` +
+      `Cancel</button>` +
+      `</div></div>`;
+    document.body.appendChild(popup);
+    document.getElementById('lmp-save').addEventListener('click', () => {
+      hideLeaveMatchPopup();
+      saveActiveMatch();
+      screenStack.length = 0;
+      showScreen('screen-home');
+    });
+    document.getElementById('lmp-abandon').addEventListener('click', () => {
+      hideLeaveMatchPopup();
+      showAbandonConfirm();
+    });
+    document.getElementById('lmp-cancel').addEventListener('click', hideLeaveMatchPopup);
+    popup.addEventListener('click', e => { if (e.target === popup) hideLeaveMatchPopup(); });
+  }
+  popup.style.display = 'flex';
+}
+function hideLeaveMatchPopup() {
+  const p = document.getElementById('leave-match-popup');
+  if (p) p.style.display = 'none';
+}
+
+// ── Abandon match — second confirmation ───────────────
+function showAbandonConfirm() {
+  let popup = document.getElementById('abandon-confirm-popup');
+  if (!popup) {
+    popup = document.createElement('div');
+    popup.id = 'abandon-confirm-popup';
+    popup.className = 'undo-popup-overlay';
+    popup.innerHTML =
+      `<div class="undo-popup-box">` +
+      `<div class="undo-popup-title">Are you sure?<br>` +
+      `<span style="font-size:0.8rem;font-weight:400;color:#888;">This cannot be undone.</span></div>` +
+      `<div class="undo-popup-btns">` +
+      `<button class="undo-popup-yes" id="abandon-yes" style="background:var(--danger);">Abandon</button>` +
+      `<button class="undo-popup-no"  id="abandon-no">Cancel</button>` +
+      `</div></div>`;
+    document.body.appendChild(popup);
+    document.getElementById('abandon-yes').addEventListener('click', () => {
+      hideAbandonConfirm();
+      try { localStorage.removeItem(ACTIVE_MATCH_KEY); } catch(e) {}
+      screenStack.length = 0;
+      showScreen('screen-home');
+    });
+    document.getElementById('abandon-no').addEventListener('click', hideAbandonConfirm);
+    popup.addEventListener('click', e => { if (e.target === popup) hideAbandonConfirm(); });
+  }
+  popup.style.display = 'flex';
+}
+function hideAbandonConfirm() {
+  const p = document.getElementById('abandon-confirm-popup');
+  if (p) p.style.display = 'none';
+}
+
+// ── Finish match confirmation popup ───────────────────
+function showFinishMatchPopup() {
+  const home = escHtml(matchState.homeTeam || 'PHD');
+  const away = escHtml(matchState.awayTeam || 'Opponents');
+  const hp   = matchState.points.home;
+  const ap   = matchState.points.away;
+  let popup = document.getElementById('finish-match-popup');
+  if (!popup) {
+    popup = document.createElement('div');
+    popup.id = 'finish-match-popup';
+    popup.className = 'undo-popup-overlay';
+    popup.innerHTML =
+      `<div class="undo-popup-box">` +
+      `<div class="undo-popup-title" id="fmp-title"></div>` +
+      `<div class="undo-popup-btns">` +
+      `<button class="undo-popup-yes" id="fmp-confirm">Confirm</button>` +
+      `<button class="undo-popup-no"  id="fmp-cancel">Cancel</button>` +
+      `</div></div>`;
+    document.body.appendChild(popup);
+    document.getElementById('fmp-confirm').addEventListener('click', () => {
+      hideFinishMatchPopup();
+      saveMatchToHistory();
+      try { localStorage.removeItem(ACTIVE_MATCH_KEY); } catch(e) {}
+      screenStack.length = 0;
+      showScreen('screen-home');
+    });
+    document.getElementById('fmp-cancel').addEventListener('click', hideFinishMatchPopup);
+    popup.addEventListener('click', e => { if (e.target === popup) hideFinishMatchPopup(); });
+  }
+  document.getElementById('fmp-title').innerHTML =
+    `End match?<br><span style="font-size:1rem;color:var(--accent);">${home} ${hp} &ndash; ${ap} ${away}</span>`;
+  popup.style.display = 'flex';
+}
+function hideFinishMatchPopup() {
+  const p = document.getElementById('finish-match-popup');
+  if (p) p.style.display = 'none';
+}
+
+// ── Replace btn-back with match-aware version ─────────
+(function(){
+  const btn = document.getElementById('btn-back');
+  if (!btn) return;
+  const newBtn = btn.cloneNode(true);
+  btn.parentNode.replaceChild(newBtn, btn);
+  newBtn.addEventListener('click', () => {
+    if (isMatchActive()) { showLeaveMatchPopup(); return; }
+    if (!screenStack.length) return;
+    showScreen(screenStack.pop());
+    document.getElementById('btn-back').style.display =
+      screenStack.length ? 'block' : 'none';
+  });
+}());
+
+// ── Replace btn-home with match-aware version ─────────
+(function(){
+  const btn = document.getElementById('btn-home');
+  if (!btn) return;
+  const newBtn = btn.cloneNode(true);
+  btn.parentNode.replaceChild(newBtn, btn);
+  newBtn.addEventListener('click', () => {
+    if (isMatchActive()) { showLeaveMatchPopup(); return; }
+    screenStack.length = 0;
+    showScreen('screen-home');
+  });
+}());
+
+// ── Replace btn-finish-match with confirmation version ─
+(function(){
+  const btn = document.getElementById('btn-finish-match');
+  if (!btn) return;
+  const newBtn = btn.cloneNode(true);
+  btn.parentNode.replaceChild(newBtn, btn);
+  newBtn.addEventListener('click', () => {
+    if (gameState.mode !== 'training' && matchState.currentGame === 9 &&
+        matchState.games[8] && matchState.games[8].winner) {
+      showFinishMatchPopup();
+    } else {
+      screenStack.length = 0;
+      showScreen('screen-home');
+    }
+  });
+}());
+
+// ── Show resume button on load if a saved match exists ─
+renderHomeResumeMatch();
 
 /* ══════════════════════════════════════════════════════
    TOURNAMENT MODE
